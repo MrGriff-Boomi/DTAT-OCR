@@ -218,6 +218,119 @@ DTAT-OCR/
 └── requirements.txt          # Python dependencies
 ```
 
+## Roadmap
+
+### Current Status: MVP Complete
+
+The core document processing pipeline is fully functional for local and Docker deployments.
+
+### Planned Features: AWS Production Deployment
+
+The following features are planned for enterprise-scale AWS deployment:
+
+#### SQS Integration (Job Queuing)
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Boomi /   │────▶│  SQS Queue  │────▶│  DTAT OCR   │────▶│   Results   │
+│  External   │     │  (intake)   │     │   Workers   │     │  S3 + RDS   │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+- **Purpose**: Decouple document intake from processing
+- **Benefits**:
+  - Handle traffic spikes without losing documents
+  - Multiple workers can pull from the same queue
+  - Failed jobs return to queue automatically
+  - Fire-and-forget from upstream systems
+
+#### PostgreSQL/RDS Support
+
+- **Current**: SQLite (single-file, good for dev/small scale)
+- **Planned**: Amazon RDS PostgreSQL
+- **Benefits**:
+  - Handle concurrent connections from multiple workers
+  - Automatic backups and point-in-time recovery
+  - Multi-AZ failover for high availability
+  - Connection pooling for better performance
+
+#### ECS Fargate Deployment
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        AWS VPC                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │  ECS Task    │  │  ECS Task    │  │  ECS Task    │       │
+│  │  (GPU)       │  │  (GPU)       │  │  (GPU)       │       │
+│  │  g4dn.xlarge │  │  g4dn.xlarge │  │  g4dn.xlarge │  ...  │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│         │                 │                 │                │
+│         └─────────────────┴─────────────────┘                │
+│                           │                                  │
+│                    ┌──────▼──────┐                          │
+│                    │   RDS       │                          │
+│                    │ PostgreSQL  │                          │
+│                    └─────────────┘                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **Compute**: ECS Fargate with GPU instances (g4dn.xlarge)
+- **Model weights**: Baked into Docker image (no download on startup)
+- **Scaling**: Auto-scale based on SQS queue depth
+
+#### Auto-Scaling Configuration
+
+| Metric | Scale Up | Scale Down |
+|--------|----------|------------|
+| SQS Queue Depth | > 100 messages | < 10 messages |
+| Min Instances | 1 | - |
+| Max Instances | 10 | - |
+| Cooldown | 60 seconds | 300 seconds |
+
+#### CloudWatch Integration
+
+- **Metrics**: Processing time, success rate, queue depth, error rate
+- **Logs**: Structured JSON logging for all processing events
+- **Alarms**: Alert on DLQ growth, high error rate, processing delays
+
+#### AWS Textract Fallback
+
+- **Status**: Code ready, disabled by default
+- **Purpose**: Paid fallback for documents that fail local OCR
+- **Cost**: ~$0.015/page
+- **Enable**: Set `ENABLE_TEXTRACT=true` in environment
+
+### Planned Architecture Diagram
+
+```
+                                    ┌─────────────────┐
+                                    │   CloudWatch    │
+                                    │   Logs/Metrics  │
+                                    └────────▲────────┘
+                                             │
+┌──────────┐    ┌──────────┐    ┌────────────┴────────────┐    ┌──────────┐
+│  Boomi   │───▶│   SQS    │───▶│      ECS Fargate        │───▶│   S3     │
+│  Input   │    │  Queue   │    │  (GPU Workers x N)      │    │  Output  │
+└──────────┘    └──────────┘    └────────────┬────────────┘    └──────────┘
+                                             │
+                                    ┌────────▼────────┐
+                                    │   RDS Postgres  │
+                                    │   (metadata)    │
+                                    └─────────────────┘
+```
+
+### Cost Estimates (100K docs/month)
+
+| Component | Estimated Cost |
+|-----------|---------------|
+| ECS Fargate (g4dn.xlarge, ~100 hrs) | ~$150-200 |
+| RDS PostgreSQL (db.t3.medium) | ~$30 |
+| SQS (100K messages) | < $1 |
+| S3 Storage (100GB) | ~$2 |
+| **Total** | **~$200/month** |
+
+*Note: Using local OCR instead of Textract saves ~$1,500/month at this volume.*
+
 ## License
 
 This project uses only permissively licensed dependencies:
