@@ -1,5 +1,5 @@
 # =============================================================================
-# Document OCR Pipeline - GPU Docker Image (AWS ECS)
+# DTAT OCR (Ducktape and Twine OCR) - GPU Docker Image (AWS ECS)
 # =============================================================================
 # For deployment on GPU instances (g4dn.xlarge, etc.)
 # Uses NVIDIA CUDA base image for GPU acceleration
@@ -31,7 +31,7 @@ FROM nvidia/cuda:12.1-runtime-ubuntu22.04
 
 # Labels
 LABEL maintainer="your-email@example.com"
-LABEL description="Document OCR Pipeline with LightOnOCR (GPU)"
+LABEL description="DTAT OCR - Swiss Army Knife document processor with OCR fallback (GPU)"
 LABEL version="1.0.0"
 
 # Environment
@@ -76,6 +76,9 @@ COPY database.py .
 COPY extraction_pipeline.py .
 COPY worker.py .
 COPY api.py .
+
+# Copy Web UI templates
+COPY templates/ ./templates/
 
 # Create directories
 RUN mkdir -p /app/data /app/temp

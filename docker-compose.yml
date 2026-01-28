@@ -1,5 +1,5 @@
 # =============================================================================
-# Docker Compose - Local Development
+# DTAT OCR - Docker Compose (Local Development)
 # =============================================================================
 # Usage:
 #   docker-compose up --build        # Build and run
@@ -11,11 +11,11 @@
 version: '3.8'
 
 services:
-  ocr-api:
+  dtat-ocr:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ocr-api
+    container_name: dtat-ocr
     ports:
       - "8000:8000"
     volumes:

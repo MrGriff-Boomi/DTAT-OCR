@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}Process Documents - DTAT OCR{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Upload Section -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Process Document</h2>
+
+        <!-- Drop Zone -->
+        <div id="drop-zone" class="drop-zone rounded-lg p-8 text-center cursor-pointer"
+             onclick="document.getElementById('file-input').click()">
+            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="mt-2 text-sm text-gray-600">
+                <span class="font-semibold text-blue-600">Click to upload</span> or drag and drop
+            </p>
+            <p class="mt-1 text-xs text-gray-500">
+                PDF, DOCX, XLSX, CSV, PNG, JPG up to 50MB
+            </p>
+        </div>
+
+        <input type="file" id="file-input" class="hidden"
+               accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.tiff,.bmp,.gif,.webp">
+
+        <!-- Selected File Info -->
+        <div id="file-info" class="hidden mt-4 p-3 bg-gray-50 rounded-lg">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <svg class="h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                    </svg>
+                    <div class="ml-3">
+                        <p id="file-name" class="text-sm font-medium text-gray-900"></p>
+                        <p id="file-size" class="text-xs text-gray-500"></p>
+                    </div>
+                </div>
+                <button onclick="clearFile()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Process Button -->
+        <button id="process-btn" onclick="processDocument()" disabled
+                class="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors">
+            <span id="process-btn-text">Process Document</span>
+            <span id="process-spinner" class="hidden">
+                <svg class="animate-spin inline h-5 w-5 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Processing...
+            </span>
+        </button>
+    </div>
+
+    <!-- Results Section -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Results</h2>
+        <div id="results-container">
+            <div class="text-center py-12 text-gray-500">
+                <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <p class="mt-2">Upload a document to see results</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Section -->
+<div class="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4" hx-get="/api/stats-cards" hx-trigger="load, every 30s" hx-swap="innerHTML">
+    <!-- Stats will be loaded here -->
+</div>
+
+<!-- Recent Documents -->
+<div class="mt-6 bg-white shadow rounded-lg p-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Recent Documents</h2>
+    <div id="recent-documents" hx-get="/api/recent-documents" hx-trigger="load, documentProcessed from:body" hx-swap="innerHTML">
+        <!-- Recent docs will be loaded here -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedFile = null;
+
+// File input handling
+document.getElementById('file-input').addEventListener('change', function(e) {
+    if (e.target.files.length > 0) {
+        selectFile(e.target.files[0]);
+    }
+});
+
+// Drag and drop handling
+const dropZone = document.getElementById('drop-zone');
+
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) {
+        selectFile(e.dataTransfer.files[0]);
+    }
+});
+
+function selectFile(file) {
+    selectedFile = file;
+    document.getElementById('file-info').classList.remove('hidden');
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-size').textContent = formatFileSize(file.size);
+    document.getElementById('process-btn').disabled = false;
+}
+
+function clearFile() {
+    selectedFile = null;
+    document.getElementById('file-input').value = '';
+    document.getElementById('file-info').classList.add('hidden');
+    document.getElementById('process-btn').disabled = true;
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function processDocument() {
+    if (!selectedFile) return;
+
+    const btn = document.getElementById('process-btn');
+    const btnText = document.getElementById('process-btn-text');
+    const spinner = document.getElementById('process-spinner');
+    const resultsContainer = document.getElementById('results-container');
+
+    // Show loading state
+    btn.disabled = true;
+    btnText.classList.add('hidden');
+    spinner.classList.remove('hidden');
+    resultsContainer.innerHTML = `
+        <div class="text-center py-12">
+            <svg class="animate-spin mx-auto h-12 w-12 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-4 text-gray-600">Processing document...</p>
+            <p class="text-sm text-gray-400">This may take a minute for OCR</p>
+        </div>
+    `;
+
+    try {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        const response = await fetch('/process?include_content=true', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            displayResults(result);
+            // Trigger refresh of recent documents
+            document.body.dispatchEvent(new CustomEvent('documentProcessed'));
+        } else {
+            resultsContainer.innerHTML = `
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <p class="text-red-800 font-medium">Error processing document</p>
+                    <p class="text-red-600 text-sm mt-1">${result.detail || 'Unknown error'}</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultsContainer.innerHTML = `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p class="text-red-800 font-medium">Error</p>
+                <p class="text-red-600 text-sm mt-1">${error.message}</p>
+            </div>
+        `;
+    } finally {
+        btn.disabled = false;
+        btnText.classList.remove('hidden');
+        spinner.classList.add('hidden');
+    }
+}
+
+function displayResults(result) {
+    const container = document.getElementById('results-container');
+
+    // Decode base64 content if present
+    let extractedText = '';
+    let tables = [];
+
+    if (result.extracted_content_b64) {
+        try {
+            const decoded = JSON.parse(atob(result.extracted_content_b64));
+            extractedText = decoded.text || '';
+            tables = decoded.tables || [];
+        } catch (e) {
+            console.error('Failed to decode content:', e);
+        }
+    }
+
+    const statusColor = result.status === 'completed' ? 'green' : (result.status === 'needs_review' ? 'yellow' : 'red');
+
+    container.innerHTML = `
+        <div class="space-y-4">
+            <!-- Status Badge -->
+            <div class="flex items-center justify-between">
+                <span class="inline-flex items-center rounded-full bg-${statusColor}-100 px-2.5 py-0.5 text-xs font-medium text-${statusColor}-800">
+                    ${result.status}
+                </span>
+                <span class="text-sm text-gray-500">ID: ${result.id}</span>
+            </div>
+
+            <!-- Metadata Grid -->
+            <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                    <span class="text-gray-500">Method:</span>
+                    <span class="ml-2 font-medium">${result.extraction_method || 'N/A'}</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Confidence:</span>
+                    <span class="ml-2 font-medium">${result.confidence_score ? result.confidence_score.toFixed(1) + '%' : 'N/A'}</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Pages:</span>
+                    <span class="ml-2 font-medium">${result.page_count || 1}</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Characters:</span>
+                    <span class="ml-2 font-medium">${result.char_count ? result.char_count.toLocaleString() : 'N/A'}</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Tables:</span>
+                    <span class="ml-2 font-medium">${result.table_count || 0}</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Time:</span>
+                    <span class="ml-2 font-medium">${result.processing_time_ms ? (result.processing_time_ms / 1000).toFixed(1) + 's' : 'N/A'}</span>
+                </div>
+            </div>
+
+            <!-- Extracted Text -->
+            ${extractedText ? `
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-700">Extracted Text</span>
+                    <button onclick="copyToClipboard()" class="text-xs text-blue-600 hover:text-blue-800">Copy</button>
+                </div>
+                <pre id="extracted-text" class="bg-gray-50 rounded-lg p-3 text-sm text-gray-800 max-h-96 overflow-y-auto">${escapeHtml(extractedText)}</pre>
+            </div>
+            ` : ''}
+
+            <!-- Error Message -->
+            ${result.error_message ? `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p class="text-sm text-red-800">${result.error_message}</p>
+            </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function copyToClipboard() {
+    const text = document.getElementById('extracted-text').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard!');
+    });
+}
+</script>
+{% endblock %}

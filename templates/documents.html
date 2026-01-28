@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Documents - DTAT OCR{% endblock %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg">
+    <div class="px-6 py-4 border-b border-gray-200">
+        <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900">All Documents</h2>
+            <div class="flex items-center space-x-4">
+                <!-- Filter -->
+                <select id="status-filter" onchange="filterDocuments()"
+                        class="rounded-md border-gray-300 text-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="">All Status</option>
+                    <option value="completed">Completed</option>
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    <option value="failed">Failed</option>
+                    <option value="needs_review">Needs Review</option>
+                </select>
+                <!-- Refresh -->
+                <button onclick="refreshDocuments()" class="text-gray-500 hover:text-gray-700">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Documents Table -->
+    <div id="documents-table" hx-get="/api/documents-table" hx-trigger="load" hx-swap="innerHTML">
+        <div class="p-8 text-center text-gray-500">
+            <svg class="animate-spin mx-auto h-8 w-8 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-2">Loading documents...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Document Detail Modal -->
+<div id="document-modal" class="hidden fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-900">Document Details</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div id="modal-content" class="p-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
+            <!-- Content loaded dynamically -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterDocuments() {
+    const status = document.getElementById('status-filter').value;
+    const url = status ? `/api/documents-table?status=${status}` : '/api/documents-table';
+    htmx.ajax('GET', url, '#documents-table');
+}
+
+function refreshDocuments() {
+    filterDocuments();
+}
+
+async function viewDocument(id) {
+    const modal = document.getElementById('document-modal');
+    const content = document.getElementById('modal-content');
+
+    content.innerHTML = `
+        <div class="text-center py-8">
+            <svg class="animate-spin mx-auto h-8 w-8 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+    `;
+    modal.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/documents/${id}/content`);
+        const data = await response.json();
+
+        if (response.ok) {
+            content.innerHTML = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div><span class="text-gray-500">Filename:</span> <span class="font-medium">${data.source_filename}</span></div>
+                        <div><span class="text-gray-500">Status:</span> <span class="font-medium">${data.status}</span></div>
+                    </div>
+
+                    ${data.extracted_text ? `
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-700 mb-2">Extracted Text</h4>
+                        <pre class="bg-gray-50 rounded-lg p-4 text-sm max-h-96 overflow-y-auto whitespace-pre-wrap">${escapeHtml(data.extracted_text)}</pre>
+                    </div>
+                    ` : '<p class="text-gray-500">No extracted text available</p>'}
+
+                    ${data.extracted_tables && data.extracted_tables.length > 0 ? `
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-700 mb-2">Tables (${data.extracted_tables.length})</h4>
+                        <pre class="bg-gray-50 rounded-lg p-4 text-sm max-h-48 overflow-y-auto">${JSON.stringify(data.extracted_tables, null, 2)}</pre>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        } else {
+            content.innerHTML = `<p class="text-red-600">Error loading document: ${data.detail || 'Unknown error'}</p>`;
+        }
+    } catch (error) {
+        content.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
+    }
+}
+
+async function retryDocument(id) {
+    if (!confirm('Retry processing this document?')) return;
+
+    try {
+        const response = await fetch(`/documents/${id}/retry`, { method: 'POST' });
+        if (response.ok) {
+            refreshDocuments();
+        } else {
+            alert('Failed to retry document');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function closeModal() {
+    document.getElementById('document-modal').classList.add('hidden');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - DTAT OCR{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+    <!-- Extraction Settings -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Extraction Pipeline</h2>
+        <p class="text-sm text-gray-500 mb-4">Configure which extraction methods are enabled and their order.</p>
+
+        <div class="space-y-4">
+            <!-- Level 1: Native -->
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div>
+                    <div class="flex items-center">
+                        <span class="inline-flex items-center justify-center h-6 w-6 rounded-full bg-green-100 text-green-800 text-xs font-medium mr-3">1</span>
+                        <span class="font-medium text-gray-900">Native Extraction</span>
+                        <span class="ml-2 inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">FREE</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1 ml-9">PyMuPDF, pandas, python-docx for digital documents</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="enable_native" checked disabled class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
+            <!-- Level 2: Local OCR -->
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div>
+                    <div class="flex items-center">
+                        <span class="inline-flex items-center justify-center h-6 w-6 rounded-full bg-blue-100 text-blue-800 text-xs font-medium mr-3">2</span>
+                        <span class="font-medium text-gray-900">LightOnOCR</span>
+                        <span class="ml-2 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">LOCAL</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1 ml-9">Local AI model for scanned documents and images</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="enable_local_ocr" {{ 'checked' if config.enable_local_ocr else '' }} class="sr-only peer" onchange="updateSetting('enable_local_ocr', this.checked)">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
+            <!-- Level 3: Textract -->
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div>
+                    <div class="flex items-center">
+                        <span class="inline-flex items-center justify-center h-6 w-6 rounded-full bg-yellow-100 text-yellow-800 text-xs font-medium mr-3">3</span>
+                        <span class="font-medium text-gray-900">AWS Textract</span>
+                        <span class="ml-2 inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">PAID</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1 ml-9">AWS managed OCR service (~$0.015/page)</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="enable_textract" {{ 'checked' if config.enable_textract else '' }} class="sr-only peer" onchange="updateSetting('enable_textract', this.checked)">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quality Settings -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Quality Thresholds</h2>
+        <p class="text-sm text-gray-500 mb-4">Configure when to escalate to the next extraction level.</p>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                    Minimum Confidence Score
+                </label>
+                <div class="flex items-center">
+                    <input type="range" id="min_confidence" min="0" max="100" value="{{ config.min_confidence_score }}"
+                           class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                           oninput="document.getElementById('confidence-value').textContent = this.value + '%'">
+                    <span id="confidence-value" class="ml-4 text-sm font-medium text-gray-900 w-12">{{ config.min_confidence_score }}%</span>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Below this score, escalate to next extraction method</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                    Max Retries Per Level
+                </label>
+                <select id="max_retries" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                    <option value="1" {{ 'selected' if config.max_retries_per_level == 1 else '' }}>1</option>
+                    <option value="2" {{ 'selected' if config.max_retries_per_level == 2 else '' }}>2</option>
+                    <option value="3" {{ 'selected' if config.max_retries_per_level == 3 else '' }}>3</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Settings -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Model Settings</h2>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">OCR Model</label>
+                <input type="text" value="{{ config.ocr_model_name }}" readonly
+                       class="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm">
+            </div>
+
+            <div class="flex items-center justify-between">
+                <div>
+                    <span class="font-medium text-gray-900">Offline Mode</span>
+                    <p class="text-sm text-gray-500">Don't call HuggingFace Hub (use cached model)</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="offline_mode" {{ 'checked' if config.ocr_offline_mode else '' }} class="sr-only peer" disabled>
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Info -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">System Information</h2>
+
+        <div id="system-info" hx-get="/api/system-info" hx-trigger="load" hx-swap="innerHTML">
+            <div class="animate-pulse space-y-2">
+                <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div class="h-4 bg-gray-200 rounded w-1/2"></div>
+                <div class="h-4 bg-gray-200 rounded w-2/3"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Button -->
+    <div class="flex justify-end">
+        <button onclick="saveSettings()" class="bg-blue-600 text-white py-2 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+            Save Settings
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function updateSetting(key, value) {
+    console.log(`Setting ${key} = ${value}`);
+    // Settings are saved on button click
+}
+
+async function saveSettings() {
+    const settings = {
+        enable_local_ocr: document.getElementById('enable_local_ocr').checked,
+        enable_textract: document.getElementById('enable_textract').checked,
+        min_confidence_score: parseInt(document.getElementById('min_confidence').value),
+        max_retries_per_level: parseInt(document.getElementById('max_retries').value),
+    };
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            alert('Settings saved successfully!');
+        } else {
+            alert('Failed to save settings');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+</script>
+{% endblock %}

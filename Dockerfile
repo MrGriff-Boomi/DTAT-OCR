@@ -1,9 +1,9 @@
 # =============================================================================
-# Document OCR Pipeline - Docker Image
+# DTAT OCR (Ducktape and Twine OCR) - Docker Image
 # =============================================================================
 # Multi-stage build:
 # 1. Download model weights (cached layer)
-# 2. Build final image with code + model
+# 2. Build final image with code + model + Web UI
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -29,7 +29,7 @@ FROM python:3.12-slim
 
 # Labels
 LABEL maintainer="your-email@example.com"
-LABEL description="Document OCR Pipeline with LightOnOCR"
+LABEL description="DTAT OCR - Swiss Army Knife document processor with OCR fallback"
 LABEL version="1.0.0"
 
 # Environment
@@ -66,6 +66,9 @@ COPY database.py .
 COPY extraction_pipeline.py .
 COPY worker.py .
 COPY api.py .
+
+# Copy Web UI templates
+COPY templates/ ./templates/
 
 # Create directories
 RUN mkdir -p /app/data /app/temp
