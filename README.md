@@ -1,5 +1,9 @@
 # DTAT OCR (Ducktape and Twine OCR)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 Swiss Army Knife document processor with OCR fallback. Handles PDFs, Excel, CSV, Word, and images with automatic retry logic and quality scoring.
 
 ## Features
@@ -86,6 +90,9 @@ Open http://localhost:8000 in your browser.
 ## CLI Usage
 
 ```bash
+# Initialize database (required first time)
+python worker.py init
+
 # Process single document
 python worker.py process document.pdf
 python worker.py process receipt.jpg --json
@@ -101,6 +108,11 @@ python worker.py stats
 
 # View failed documents (DLQ)
 python worker.py dlq
+
+# View/modify configuration
+python worker.py config
+python worker.py config --enable-textract
+python worker.py config --disable-textract
 ```
 
 ## API Endpoints
@@ -137,6 +149,12 @@ curl http://localhost:8000/documents/1/content
 
 ## Docker
 
+### Build Notes
+
+- **First build**: Takes 5-10 minutes (downloads ~2GB model weights)
+- **Subsequent builds**: Much faster due to Docker layer caching
+- **Data persistence**: Documents stored in `./data/documents.db` - back up this directory
+
 ### CPU Image
 
 ```bash
@@ -147,8 +165,14 @@ docker run -p 8000:8000 -v $(pwd)/data:/app/data dtat-ocr:cpu
 ### GPU Image
 
 ```bash
+# Build GPU image
 docker build -f Dockerfile.gpu -t dtat-ocr:gpu .
+
+# Run with NVIDIA GPU support
+docker run --gpus all -p 8000:8000 -v $(pwd)/data:/app/data dtat-ocr:gpu
 ```
+
+**Note**: Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 
 ### Docker Compose
 
@@ -180,8 +204,8 @@ Edit `config.py` or use the Web UI at `/ui/settings`:
 | PDF (scanned) | OCR | LightOnOCR |
 | Excel (.xlsx, .xls) | Native | pandas + openpyxl |
 | CSV | Native | pandas |
-| Word (.docx) | Native | python-docx |
-| Images (JPG, PNG, TIFF, etc.) | OCR | LightOnOCR |
+| Word (.docx, .doc) | Native | python-docx |
+| Images | OCR | JPG, JPEG, PNG, TIFF, TIF, BMP, GIF, WebP |
 
 ## Model Information
 
@@ -232,8 +256,8 @@ The following features are planned for enterprise-scale AWS deployment:
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Boomi /   │────▶│  SQS Queue  │────▶│  DTAT OCR   │────▶│   Results   │
-│  External   │     │  (intake)   │     │   Workers   │     │  S3 + RDS   │
+│  External   │────▶│  SQS Queue  │────▶│  DTAT OCR   │────▶│   Results   │
+│   System    │     │  (intake)   │     │   Workers   │     │  S3 + RDS   │
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
 ```
 
@@ -309,8 +333,8 @@ The following features are planned for enterprise-scale AWS deployment:
                                     └────────▲────────┘
                                              │
 ┌──────────┐    ┌──────────┐    ┌────────────┴────────────┐    ┌──────────┐
-│  Boomi   │───▶│   SQS    │───▶│      ECS Fargate        │───▶│   S3     │
-│  Input   │    │  Queue   │    │  (GPU Workers x N)      │    │  Output  │
+│ External │───▶│   SQS    │───▶│      ECS Fargate        │───▶│   S3     │
+│  System  │    │  Queue   │    │  (GPU Workers x N)      │    │  Output  │
 └──────────┘    └──────────┘    └────────────┬────────────┘    └──────────┘
                                              │
                                     ┌────────▼────────┐
