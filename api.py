@@ -26,11 +26,13 @@ from datetime import datetime
 from typing import Optional
 import json
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Query, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
+import secrets
 
 from config import config
 from database import (
@@ -51,6 +53,25 @@ app = FastAPI(
 
 # Templates
 templates = Jinja2Templates(directory="templates")
+
+# Security
+security = HTTPBasic()
+
+# Get credentials from environment variables (with defaults for development)
+API_USERNAME = os.getenv("DTAT_USERNAME", "admin")
+API_PASSWORD = os.getenv("DTAT_PASSWORD", "changeme123")
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify HTTP Basic Auth credentials"""
+    correct_username = secrets.compare_digest(credentials.username.encode("utf8"), API_USERNAME.encode("utf8"))
+    correct_password = secrets.compare_digest(credentials.password.encode("utf8"), API_PASSWORD.encode("utf8"))
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 # Initialize database on startup
 @app.on_event("startup")
@@ -126,7 +147,7 @@ class SettingsUpdate(BaseModel):
 # =============================================================================
 
 @app.get("/", response_class=HTMLResponse)
-async def ui_home(request: Request):
+async def ui_home(request: Request, username: str = Depends(verify_credentials)):
     """Main processing page."""
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -135,7 +156,7 @@ async def ui_home(request: Request):
 
 
 @app.get("/ui/documents", response_class=HTMLResponse)
-async def ui_documents(request: Request):
+async def ui_documents(request: Request, username: str = Depends(verify_credentials)):
     """Documents list page."""
     return templates.TemplateResponse("documents.html", {
         "request": request,
@@ -144,7 +165,7 @@ async def ui_documents(request: Request):
 
 
 @app.get("/ui/settings", response_class=HTMLResponse)
-async def ui_settings(request: Request):
+async def ui_settings(request: Request, username: str = Depends(verify_credentials)):
     """Settings page."""
     return templates.TemplateResponse("settings.html", {
         "request": request,
@@ -158,7 +179,7 @@ async def ui_settings(request: Request):
 # =============================================================================
 
 @app.get("/api/health-badge", response_class=HTMLResponse)
-async def health_badge():
+async def health_badge(username: str = Depends(verify_credentials)):
     """Health check badge for navbar."""
     try:
         from sqlalchemy import text
@@ -180,7 +201,7 @@ async def health_badge():
 
 
 @app.get("/api/stats-cards", response_class=HTMLResponse)
-async def stats_cards():
+async def stats_cards(username: str = Depends(verify_credentials)):
     """Stats cards for dashboard."""
     from sqlalchemy import func
 
@@ -219,7 +240,7 @@ async def stats_cards():
 
 
 @app.get("/api/recent-documents", response_class=HTMLResponse)
-async def recent_documents():
+async def recent_documents(username: str = Depends(verify_credentials)):
     """Recent documents table for dashboard."""
     session = get_session()
     try:
@@ -270,7 +291,7 @@ async def recent_documents():
 
 
 @app.get("/api/documents-table", response_class=HTMLResponse)
-async def documents_table(status: Optional[str] = None):
+async def documents_table(status: Optional[str] = None, username: str = Depends(verify_credentials)):
     """Full documents table."""
     session = get_session()
     try:
@@ -334,7 +355,7 @@ async def documents_table(status: Optional[str] = None):
 
 
 @app.get("/api/system-info", response_class=HTMLResponse)
-async def system_info():
+async def system_info(username: str = Depends(verify_credentials)):
     """System information for settings page."""
     import torch
 
@@ -357,7 +378,7 @@ async def system_info():
 
 
 @app.post("/api/settings")
-async def update_settings(settings: SettingsUpdate):
+async def update_settings(settings: SettingsUpdate, username: str = Depends(verify_credentials)):
     """Update configuration settings."""
     if settings.enable_local_ocr is not None:
         config.enable_local_ocr = settings.enable_local_ocr
@@ -399,7 +420,8 @@ async def health_check():
 @app.post("/process", response_model=DocumentResponse)
 async def process_document_sync(
     file: UploadFile = File(...),
-    include_content: bool = Query(False, description="Include extracted content in response")
+    include_content: bool = Query(False, description="Include extracted content in response"),
+    username: str = Depends(verify_credentials)
 ):
     """
     Upload and process a document synchronously.
@@ -460,7 +482,8 @@ async def process_document_sync(
 
 @app.post("/process/async", response_model=ProcessingResponse)
 async def process_document_async(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    username: str = Depends(verify_credentials)
 ):
     """
     Upload a document for async processing.
@@ -511,7 +534,8 @@ def process_document_background(doc_id: int, file_bytes: bytes, file_type: str):
 @app.get("/documents/{doc_id}", response_model=DocumentResponse)
 async def get_document_by_id(
     doc_id: int,
-    include_content: bool = Query(False, description="Include extracted content")
+    include_content: bool = Query(False, description="Include extracted content"),
+    username: str = Depends(verify_credentials)
 ):
     """Get document processing result by ID."""
     record = get_document(doc_id)
@@ -541,7 +565,7 @@ async def get_document_by_id(
 
 
 @app.get("/documents/{doc_id}/content", response_model=DocumentContentResponse)
-async def get_document_content(doc_id: int):
+async def get_document_content(doc_id: int, username: str = Depends(verify_credentials)):
     """Get extracted content (decoded from base64)."""
     record = get_document(doc_id)
     if not record:
@@ -566,7 +590,8 @@ async def get_document_content(doc_id: int):
 async def list_documents(
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    username: str = Depends(verify_credentials)
 ):
     """List all documents with optional filtering."""
     session = get_session()
@@ -600,7 +625,7 @@ async def list_documents(
 
 
 @app.get("/stats", response_model=StatsResponse)
-async def get_stats():
+async def get_stats(username: str = Depends(verify_credentials)):
     """Get processing statistics."""
     from sqlalchemy import func
 
@@ -635,7 +660,7 @@ async def get_stats():
 
 
 @app.get("/dlq")
-async def get_dead_letter_queue(limit: int = Query(50, ge=1, le=500)):
+async def get_dead_letter_queue(limit: int = Query(50, ge=1, le=500), username: str = Depends(verify_credentials)):
     """Get documents that need manual review."""
     failed = get_failed_documents(limit=limit)
     return {
@@ -656,7 +681,7 @@ async def get_dead_letter_queue(limit: int = Query(50, ge=1, le=500)):
 
 
 @app.post("/documents/{doc_id}/retry")
-async def retry_document(doc_id: int, background_tasks: BackgroundTasks):
+async def retry_document(doc_id: int, background_tasks: BackgroundTasks, username: str = Depends(verify_credentials)):
     """Retry processing a failed document."""
     record = get_document(doc_id)
     if not record:
