@@ -14,8 +14,18 @@ Swiss Army Knife document processor with OCR fallback. Handles PDFs, Excel, CSV,
 - **LightOnOCR integration**: Local AI-powered OCR for scanned documents
 - **Web UI**: Drag-and-drop processing, document viewer, and settings
 - **REST API**: Easy integration with existing systems
+- **HTTP Basic Authentication**: Secure access control for all endpoints
 - **Docker ready**: CPU and GPU images available
 - **Fully permissive licensing**: All dependencies are MIT/BSD/Apache 2.0
+
+## Live Demo (AWS Deployment)
+
+**Status:** ✅ Live and operational on AWS g4dn.xlarge
+
+- **URL**: http://54.80.47.194:8000
+- **Credentials**: Contact admin for access
+- **Deployment**: See `DEPLOYMENT-LOG.md` for full details
+- **Cost**: ~$92/month (8hrs/day, 20 days/month)
 
 ## Architecture
 
@@ -143,9 +153,54 @@ curl -X POST http://localhost:8000/process \
 curl -X POST http://localhost:8000/process/async \
   -F "file=@document.pdf"
 
-# Get extracted content
-curl http://localhost:8000/documents/1/content
+# Get extracted content (with auth)
+curl -u "username:password" http://localhost:8000/documents/1/content
 ```
+
+## Authentication
+
+All endpoints except `/health` require HTTP Basic Authentication.
+
+### Setting Credentials
+
+Use environment variables to set username and password:
+
+```bash
+# Local development
+export DTAT_USERNAME=admin
+export DTAT_PASSWORD=your-secure-password
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
+
+# Docker
+docker run -p 8000:8000 \
+  -e DTAT_USERNAME=admin \
+  -e DTAT_PASSWORD=your-secure-password \
+  dtat-ocr:cpu
+```
+
+**Default credentials** (change in production):
+- Username: `admin`
+- Password: `changeme123`
+
+### Using Authentication
+
+**Web Browser**: Browser will prompt for credentials automatically
+
+**curl**:
+```bash
+curl -u "username:password" http://localhost:8000/stats
+```
+
+**Python**:
+```python
+import requests
+from requests.auth import HTTPBasicAuth
+
+auth = HTTPBasicAuth('username', 'password')
+response = requests.get('http://localhost:8000/stats', auth=auth)
+```
+
+**Note**: The `/health` endpoint does not require authentication (for monitoring/health checks)
 
 ## Docker
 
