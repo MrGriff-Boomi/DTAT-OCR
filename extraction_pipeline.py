@@ -161,25 +161,33 @@ class NativeExtractor:
 
     @staticmethod
     def _extract_pdf(file_path: Path, start_time: float) -> ExtractionResult:
-        import fitz
+        import pdfplumber
 
-        doc = fitz.open(file_path)
         all_text = []
         all_tables = []
 
-        for page_num, page in enumerate(doc):
-            text = page.get_text()
-            all_text.append(text)
+        with pdfplumber.open(file_path) as pdf:
+            page_count = len(pdf.pages)
 
-            # Extract tables
-            tables = page.find_tables()
-            for table in tables:
-                df = table.to_pandas()
-                all_tables.append(df.to_dict(orient='records'))
+            for page in pdf.pages:
+                # Extract text
+                text = page.extract_text() or ""
+                all_text.append(text)
+
+                # Extract tables
+                tables = page.extract_tables()
+                for table in tables:
+                    if table and len(table) > 1:
+                        # First row as headers, rest as data
+                        headers = table[0] if table[0] else [f"col_{i}" for i in range(len(table[1]))]
+                        records = []
+                        for row in table[1:]:
+                            if row:
+                                records.append(dict(zip(headers, row)))
+                        if records:
+                            all_tables.append(records)
 
         full_text = "\n\n".join(all_text)
-        page_count = len(doc)
-        doc.close()
 
         result = ExtractionResult(
             success=True,

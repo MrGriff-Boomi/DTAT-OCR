@@ -460,10 +460,15 @@ async def process_document_sync(
 
 @app.post("/process/async", response_model=ProcessingResponse)
 async def process_document_async(
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None
+    file: UploadFile = File(...)
 ):
-    """Upload a document for async processing."""
+    """
+    Upload a document for async processing.
+
+    Document is saved to database with status=pending.
+    Use 'python worker.py worker' to process pending documents.
+    Poll GET /documents/{id} to check status.
+    """
     contents = await file.read()
     if len(contents) > config.max_file_size_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File too large. Max: {config.max_file_size_mb}MB")
@@ -474,15 +479,15 @@ async def process_document_async(
     if not file_type:
         raise HTTPException(status_code=400, detail="Could not determine file type")
 
+    # Save to database with status=pending (persistent queue)
+    # Worker process will pick this up and process it
     record = create_document_record(filename=filename, file_bytes=contents, file_type=file_type)
     doc_id = save_document(record)
 
-    background_tasks.add_task(process_document_background, doc_id, contents, file_type)
-
     return ProcessingResponse(
         document_id=doc_id,
-        status="queued",
-        message="Document queued for processing. Poll GET /documents/{id} for results."
+        status="pending",
+        message="Document saved to queue. Run 'python worker.py worker' to process. Poll GET /documents/{id} for results."
     )
 
 

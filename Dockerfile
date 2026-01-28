@@ -12,15 +12,12 @@
 FROM python:3.12-slim AS model-downloader
 
 # Install minimal dependencies for downloading
-RUN pip install --no-cache-dir huggingface_hub transformers torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir huggingface_hub transformers && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 # Download model weights to cache directory
 ENV HF_HOME=/model-cache
-RUN python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('lightonai/LightOnOCR-1B-1025', local_dir='/model-cache/lightonai/LightOnOCR-1B-1025')
-print('Model downloaded successfully')
-"
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('lightonai/LightOnOCR-1B-1025', local_dir='/model-cache/lightonai/LightOnOCR-1B-1025'); print('Model downloaded successfully')"
 
 # -----------------------------------------------------------------------------
 # Stage 2: Final image
@@ -43,9 +40,6 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # For PyMuPDF
-    libmupdf-dev \
-    mupdf-tools \
     # For image processing
     libjpeg-dev \
     libpng-dev \

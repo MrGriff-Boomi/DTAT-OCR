@@ -8,8 +8,6 @@
 #   docker-compose down              # Stop and remove
 # =============================================================================
 
-version: '3.8'
-
 services:
   dtat-ocr:
     build:

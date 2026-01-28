@@ -18,11 +18,7 @@ RUN pip3 install --no-cache-dir huggingface_hub
 
 # Download model weights
 ENV HF_HOME=/model-cache
-RUN python3 -c "
-from huggingface_hub import snapshot_download
-snapshot_download('lightonai/LightOnOCR-1B-1025', local_dir='/model-cache/lightonai/LightOnOCR-1B-1025')
-print('Model downloaded successfully')
-"
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('lightonai/LightOnOCR-1B-1025', local_dir='/model-cache/lightonai/LightOnOCR-1B-1025'); print('Model downloaded successfully')"
 
 # -----------------------------------------------------------------------------
 # Stage 2: Final GPU image
@@ -49,9 +45,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
-    # For PyMuPDF
-    libmupdf-dev \
-    mupdf-tools \
     # For image processing
     libjpeg-dev \
     libpng-dev \

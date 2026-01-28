@@ -4,7 +4,7 @@ Handles: Scanned images, PDFs (native + scanned), Excel, CSV, Word
 
 Routes to the right tool based on document type:
 - Scanned/Image → LightOnOCR (AI-based OCR)
-- Native PDF → PyMuPDF (direct text extraction)
+- Native PDF → pdfplumber (direct text extraction)
 - Excel → openpyxl/pandas
 - CSV → pandas
 - Word → python-docx
@@ -18,7 +18,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 # Document processing libraries
-import fitz  # PyMuPDF
+import pdfplumber
 import pandas as pd
 from openpyxl import load_workbook
 from docx import Document as DocxDocument
@@ -68,19 +68,20 @@ def detect_document_type(file_path: Path) -> DocumentType:
 def _check_pdf_type(file_path: Path) -> DocumentType:
     """Check if PDF is native (has text) or scanned (needs OCR)."""
     try:
-        doc = fitz.open(file_path)
-        total_text = ""
-        for page in doc:
-            total_text += page.get_text()
-        doc.close()
+        with pdfplumber.open(file_path) as pdf:
+            total_text = ""
+            page_count = len(pdf.pages)
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                total_text += text
 
-        # If we got meaningful text, it's a native PDF
-        # Threshold: at least 50 chars per page on average
-        avg_chars = len(total_text.strip()) / max(len(doc), 1)
-        if avg_chars > 50:
-            return DocumentType.PDF_NATIVE
-        else:
-            return DocumentType.PDF_SCANNED
+            # If we got meaningful text, it's a native PDF
+            # Threshold: at least 50 chars per page on average
+            avg_chars = len(total_text.strip()) / max(page_count, 1)
+            if avg_chars > 50:
+                return DocumentType.PDF_NATIVE
+            else:
+                return DocumentType.PDF_SCANNED
     except Exception:
         return DocumentType.PDF_SCANNED
 
@@ -90,32 +91,40 @@ def _check_pdf_type(file_path: Path) -> DocumentType:
 # =============================================================================
 
 def process_native_pdf(file_path: Path) -> ProcessedDocument:
-    """Extract text from a native PDF using PyMuPDF."""
-    doc = fitz.open(file_path)
-
+    """Extract text from a native PDF using pdfplumber."""
     all_text = []
     all_tables = []
+    metadata = {}
 
-    for page_num, page in enumerate(doc):
-        # Extract text
-        text = page.get_text()
-        all_text.append(f"--- Page {page_num + 1} ---\n{text}")
+    with pdfplumber.open(file_path) as pdf:
+        page_count = len(pdf.pages)
 
-        # Extract tables (PyMuPDF can find tables)
-        tables = page.find_tables()
-        for table in tables:
-            df = table.to_pandas()
-            all_tables.append(df.to_dict(orient='records'))
+        # Get metadata if available
+        if pdf.metadata:
+            metadata = {
+                "title": pdf.metadata.get("Title", ""),
+                "author": pdf.metadata.get("Author", ""),
+                "creator": pdf.metadata.get("Creator", ""),
+                "producer": pdf.metadata.get("Producer", ""),
+            }
 
-    metadata = {
-        "title": doc.metadata.get("title", ""),
-        "author": doc.metadata.get("author", ""),
-        "creator": doc.metadata.get("creator", ""),
-        "producer": doc.metadata.get("producer", ""),
-    }
+        for page_num, page in enumerate(pdf.pages):
+            # Extract text
+            text = page.extract_text() or ""
+            all_text.append(f"--- Page {page_num + 1} ---\n{text}")
 
-    page_count = len(doc)
-    doc.close()
+            # Extract tables
+            tables = page.extract_tables()
+            for table in tables:
+                if table and len(table) > 1:
+                    # First row as headers, rest as data
+                    headers = table[0] if table[0] else [f"col_{i}" for i in range(len(table[1]))]
+                    records = []
+                    for row in table[1:]:
+                        if row:
+                            records.append(dict(zip(headers, row)))
+                    if records:
+                        all_tables.append(records)
 
     return ProcessedDocument(
         source_file=str(file_path),
