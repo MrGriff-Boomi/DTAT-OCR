@@ -2,13 +2,23 @@
 DTAT OCR - Ducktape and Twine OCR
 REST API + Web UI for Document Processing Pipeline
 
+Drop-in replacement for AWS Textract, Google Cloud Vision, and Azure Computer Vision
+with multi-format output support.
+
 API Endpoints:
-- POST /process          - Upload and process a document (sync)
-- POST /process/async    - Upload and queue for processing (async)
-- GET  /documents/{id}   - Get processing result
-- GET  /documents        - List all documents
-- GET  /health           - Health check
-- GET  /stats            - Processing statistics
+- POST /process                        - Upload and process a document (sync)
+- POST /process/async                  - Upload and queue for processing (async)
+- GET  /documents/{id}                 - Get processing result
+- GET  /documents/{id}/content?format= - Get extracted content in specified format
+- GET  /documents                      - List all documents
+- GET  /health                         - Health check
+- GET  /stats                          - Processing statistics
+
+Output Formats:
+- textract (default) - AWS Textract-compatible
+- google            - Google Cloud Vision-compatible
+- azure             - Azure Computer Vision-compatible
+- dtat              - DTAT native format
 
 Web UI:
 - GET  /                 - Process documents
@@ -39,16 +49,95 @@ from database import (
     init_database, DocumentRecord, ProcessingStatus,
     create_document_record, save_document, get_document,
     get_pending_documents, get_failed_documents, update_document,
-    get_session
+    get_session,
+    # Profile management functions (TASK-002)
+    create_profile, get_profile_by_id, get_profile_by_name, list_profiles,
+    update_profile, delete_profile, create_profile_version,
+    get_profile_versions, get_profile_version, get_profile_usage_stats
 )
 from extraction_pipeline import ExtractionPipeline
+from formatters import get_formatter
+from enum import Enum
+# Profile management models (TASK-002)
+from profiles import (
+    ExtractionProfile, FieldDefinition, ProfileVersion,
+    ExtractionStrategy, FieldType
+)
+
+
+# ==================== Helper Functions (TASK-002 Code Quality) ====================
+
+def record_to_profile(record) -> ExtractionProfile:
+    """
+    Convert database record to ExtractionProfile model.
+
+    Eliminates code duplication across 8 endpoints.
+
+    Args:
+        record: ExtractionProfileRecord from database
+
+    Returns:
+        ExtractionProfile with ID and timestamps populated
+    """
+    schema = record.get_schema()
+    schema['id'] = record.id
+    schema['created_at'] = record.created_at
+    schema['updated_at'] = record.updated_at
+    return ExtractionProfile(**schema)
+
+
+def records_to_profiles(records: list) -> list[ExtractionProfile]:
+    """
+    Convert list of records to ExtractionProfile models.
+
+    Args:
+        records: List of ExtractionProfileRecord from database
+
+    Returns:
+        List of ExtractionProfile models
+    """
+    return [record_to_profile(record) for record in records]
+
+
+# Output format enum
+class OutputFormat(str, Enum):
+    """Supported output formats for OCR results"""
+    TEXTRACT = "textract"  # AWS Textract-compatible
+    GOOGLE = "google"      # Google Cloud Vision-compatible
+    AZURE = "azure"        # Azure Computer Vision-compatible
+    DTAT = "dtat"          # DTAT native format
 
 
 # Initialize
 app = FastAPI(
     title="DTAT OCR",
-    description="Ducktape and Twine OCR - Swiss Army Knife document processing",
-    version="1.0.0"
+    description="""
+    **Ducktape and Twine OCR** - Swiss Army Knife document processing
+
+    Drop-in replacement for AWS Textract, Google Cloud Vision, and Azure Computer Vision.
+
+    **Features:**
+    - Multi-format OCR output (Textract, Google Vision, Azure OCR, DTAT native)
+    - Local GPU/CPU processing (save $1.50/1000 pages vs Textract)
+    - Intelligent extraction ladder with retry logic
+    - Quality scoring and automatic escalation
+    - Support for PDF, Excel, CSV, Word, images
+
+    **Output Formats:**
+    - `textract` - AWS Textract-compatible (default)
+    - `google` - Google Cloud Vision-compatible
+    - `azure` - Azure Computer Vision-compatible
+    - `dtat` - DTAT native format
+    """,
+    version="2.0.0",
+    contact={
+        "name": "DTAT OCR",
+        "url": "https://github.com/NotADevIAmaMeatPopsicle/DTAT-OCR"
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT"
+    }
 )
 
 # Templates
@@ -242,6 +331,8 @@ async def stats_cards(username: str = Depends(verify_credentials)):
 @app.get("/api/recent-documents", response_class=HTMLResponse)
 async def recent_documents(username: str = Depends(verify_credentials)):
     """Recent documents table for dashboard."""
+    from html import escape
+
     session = get_session()
     try:
         records = session.query(DocumentRecord)\
@@ -254,17 +345,24 @@ async def recent_documents(username: str = Depends(verify_credentials)):
         rows = ""
         for r in records:
             status_color = "green" if r.status == "completed" else ("yellow" if r.status == "pending" else "red")
+
+            # Escape all user-provided data to prevent XSS
+            safe_filename = escape(r.source_filename[:30]) + ('...' if len(r.source_filename) > 30 else '')
+            safe_file_type = escape(r.file_type) if r.file_type else 'N/A'
+            safe_status = escape(r.status)
+            safe_method = escape(r.extraction_method) if r.extraction_method else 'N/A'
+
             rows += f'''
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 text-sm text-gray-900">{r.id}</td>
-                <td class="px-4 py-3 text-sm text-gray-900">{r.source_filename[:30]}{'...' if len(r.source_filename) > 30 else ''}</td>
-                <td class="px-4 py-3 text-sm text-gray-500">{r.file_type or 'N/A'}</td>
+                <td class="px-4 py-3 text-sm text-gray-900">{safe_filename}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{safe_file_type}</td>
                 <td class="px-4 py-3">
                     <span class="inline-flex items-center rounded-full bg-{status_color}-100 px-2 py-0.5 text-xs font-medium text-{status_color}-800">
-                        {r.status}
+                        {safe_status}
                     </span>
                 </td>
-                <td class="px-4 py-3 text-sm text-gray-500">{r.extraction_method or 'N/A'}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{safe_method}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">{r.confidence_score:.0f}%</td>
             </tr>
             '''
@@ -293,6 +391,8 @@ async def recent_documents(username: str = Depends(verify_credentials)):
 @app.get("/api/documents-table", response_class=HTMLResponse)
 async def documents_table(status: Optional[str] = None, username: str = Depends(verify_credentials)):
     """Full documents table."""
+    from html import escape
+
     session = get_session()
     try:
         query = session.query(DocumentRecord)
@@ -309,17 +409,23 @@ async def documents_table(status: Optional[str] = None, username: str = Depends(
             status_color = "green" if r.status == "completed" else ("yellow" if r.status in ["pending", "processing"] else "red")
             can_retry = r.status in ["failed", "needs_review"]
 
+            # Escape all user-provided data to prevent XSS
+            safe_filename = escape(r.source_filename[:40]) + ('...' if len(r.source_filename) > 40 else '')
+            safe_file_type = escape(r.file_type) if r.file_type else 'N/A'
+            safe_status = escape(r.status)
+            safe_method = escape(r.extraction_method) if r.extraction_method else 'N/A'
+
             rows += f'''
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 text-sm text-gray-900">{r.id}</td>
-                <td class="px-4 py-3 text-sm text-gray-900">{r.source_filename[:40]}{'...' if len(r.source_filename) > 40 else ''}</td>
-                <td class="px-4 py-3 text-sm text-gray-500">{r.file_type or 'N/A'}</td>
+                <td class="px-4 py-3 text-sm text-gray-900">{safe_filename}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{safe_file_type}</td>
                 <td class="px-4 py-3">
                     <span class="inline-flex items-center rounded-full bg-{status_color}-100 px-2 py-0.5 text-xs font-medium text-{status_color}-800">
-                        {r.status}
+                        {safe_status}
                     </span>
                 </td>
-                <td class="px-4 py-3 text-sm text-gray-500">{r.extraction_method or 'N/A'}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{safe_method}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">{r.confidence_score:.0f}% if r.confidence_score else 'N/A'</td>
                 <td class="px-4 py-3 text-sm text-gray-500">{r.processing_time_ms // 1000 if r.processing_time_ms else 0}s</td>
                 <td class="px-4 py-3 text-sm text-gray-500">{r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else 'N/A'}</td>
@@ -357,6 +463,7 @@ async def documents_table(status: Optional[str] = None, username: str = Depends(
 @app.get("/api/system-info", response_class=HTMLResponse)
 async def system_info(username: str = Depends(verify_credentials)):
     """System information for settings page."""
+    from html import escape
     import torch
 
     device = "CUDA" if torch.cuda.is_available() else ("MPS" if torch.backends.mps.is_available() else "CPU")
@@ -365,13 +472,17 @@ async def system_info(username: str = Depends(verify_credentials)):
     else:
         gpu_name = "N/A"
 
+    # Escape potentially untrusted values
+    safe_gpu_name = escape(gpu_name)
+    safe_db_url = escape(config.database_url[:50])
+
     return f'''
     <div class="grid grid-cols-2 gap-4 text-sm">
         <div><span class="text-gray-500">Platform:</span> <span class="font-medium">{platform.system()} {platform.release()}</span></div>
         <div><span class="text-gray-500">Python:</span> <span class="font-medium">{platform.python_version()}</span></div>
         <div><span class="text-gray-500">Compute Device:</span> <span class="font-medium">{device}</span></div>
-        <div><span class="text-gray-500">GPU:</span> <span class="font-medium">{gpu_name}</span></div>
-        <div><span class="text-gray-500">Database:</span> <span class="font-medium">{config.database_url[:50]}...</span></div>
+        <div><span class="text-gray-500">GPU:</span> <span class="font-medium">{safe_gpu_name}</span></div>
+        <div><span class="text-gray-500">Database:</span> <span class="font-medium">{safe_db_url}...</span></div>
         <div><span class="text-gray-500">Max File Size:</span> <span class="font-medium">{config.max_file_size_mb} MB</span></div>
     </div>
     '''
@@ -564,26 +675,182 @@ async def get_document_by_id(
     return response
 
 
-@app.get("/documents/{doc_id}/content", response_model=DocumentContentResponse)
-async def get_document_content(doc_id: int, username: str = Depends(verify_credentials)):
-    """Get extracted content (decoded from base64)."""
+@app.get(
+    "/documents/{doc_id}/content",
+    summary="Get extracted content in specified format",
+    description="""
+    Retrieve extracted OCR content in industry-standard format.
+
+    **DTAT is a drop-in replacement for commercial OCR services.**
+
+    ### Supported Formats
+
+    - **textract** (default): AWS Textract-compatible format
+      - Use this for seamless migration from Textract
+      - Saves $1.50/1000 pages vs actual Textract
+
+    - **google**: Google Cloud Vision-compatible format
+      - Drop-in replacement for Google Vision OCR
+      - Same JSON structure as `text_detection` API
+
+    - **azure**: Azure Computer Vision-compatible format
+      - Compatible with Azure Read API responses
+      - Matches `analyzeResult` structure
+
+    - **dtat**: DTAT native format (simple)
+      - Lightweight format with text and tables
+      - Backward compatible with existing integrations
+
+    ### Examples
+
+    ```bash
+    # AWS Textract format
+    curl -u "admin:password" "http://localhost:8000/documents/1/content?format=textract"
+
+    # Google Vision format
+    curl -u "admin:password" "http://localhost:8000/documents/1/content?format=google"
+
+    # Azure OCR format
+    curl -u "admin:password" "http://localhost:8000/documents/1/content?format=azure"
+
+    # DTAT native format
+    curl -u "admin:password" "http://localhost:8000/documents/1/content?format=dtat"
+    ```
+
+    ### Response Structure
+
+    Each format returns a different JSON structure matching the respective API:
+
+    - **Textract**: Contains `Blocks` array with geometry, confidence, relationships
+    - **Google**: Contains `textAnnotations` and `fullTextAnnotation`
+    - **Azure**: Contains `analyzeResult.readResults` with page-level data
+    - **DTAT**: Contains `extracted_text`, `extracted_tables`, `confidence_score`
+
+    ### Migration Guide
+
+    To migrate from commercial OCR services:
+
+    1. Point your existing code to DTAT endpoint
+    2. Add `?format=textract` (or google/azure) to your requests
+    3. No code changes needed - same JSON structure!
+
+    """,
+    responses={
+        200: {
+            "description": "Extracted content in requested format",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "textract": {
+                            "summary": "AWS Textract Format",
+                            "value": {
+                                "Blocks": [
+                                    {
+                                        "BlockType": "LINE",
+                                        "Id": "block_0",
+                                        "Text": "Invoice #12345",
+                                        "Confidence": 95.8,
+                                        "Geometry": {
+                                            "BoundingBox": {
+                                                "Left": 0.05,
+                                                "Top": 0.1,
+                                                "Width": 0.3,
+                                                "Height": 0.02
+                                            }
+                                        },
+                                        "Page": 1
+                                    }
+                                ],
+                                "DocumentMetadata": {
+                                    "Pages": 1
+                                }
+                            }
+                        },
+                        "dtat": {
+                            "summary": "DTAT Native Format",
+                            "value": {
+                                "status": "completed",
+                                "extracted_text": "Invoice #12345\nDate: 2024-01-15\nTotal: $1,234.56",
+                                "extracted_tables": [],
+                                "confidence_score": 95.8,
+                                "page_count": 1
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Document not ready for retrieval",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Document not ready. Status: processing"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Document not found",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Document not found"
+                    }
+                }
+            }
+        }
+    },
+    tags=["Documents", "OCR Output"]
+)
+async def get_document_content(
+    doc_id: int,
+    format: OutputFormat = OutputFormat.TEXTRACT,
+    username: str = Depends(verify_credentials)
+):
+    """
+    Get extracted content in specified format.
+
+    See endpoint description for detailed documentation and examples.
+    """
     record = get_document(doc_id)
     if not record:
         raise HTTPException(status_code=404, detail="Document not found")
 
     if record.status != ProcessingStatus.COMPLETED.value:
-        raise HTTPException(status_code=400, detail=f"Document not ready. Status: {record.status}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document not ready. Status: {record.status}"
+        )
 
-    content = record.get_extracted_content()
+    # Get normalized content from database
+    normalized_result = record.get_normalized_content()
 
-    return DocumentContentResponse(
-        id=record.id,
-        source_filename=record.source_filename,
-        status=record.status,
-        extracted_text=content.get("text"),
-        extracted_tables=content.get("tables"),
-        metadata=content.get("metadata")
-    )
+    if not normalized_result:
+        # Legacy format fallback - convert on the fly
+        from extraction_pipeline import convert_extraction_result_to_normalized, ExtractionResult
+        content = record.get_extracted_content()
+
+        # Create a temporary ExtractionResult for conversion
+        legacy_result = ExtractionResult(
+            success=True,
+            text_content=content.get("text", ""),
+            tables=content.get("tables", []),
+            metadata=content.get("metadata", {}),
+            confidence_score=record.confidence_score or 0,
+            method_used=record.extraction_method or "unknown"
+        )
+
+        normalized_result = convert_extraction_result_to_normalized(
+            legacy_result,
+            page_count=record.page_count or 1
+        )
+
+    # Get appropriate formatter and convert
+    formatter = get_formatter(format.value)
+    formatted_content = formatter.format(normalized_result)
+
+    return formatted_content
 
 
 @app.get("/documents")
@@ -701,6 +968,334 @@ async def retry_document(doc_id: int, background_tasks: BackgroundTasks, usernam
     background_tasks.add_task(process_document_background, doc_id, file_bytes, record.file_type)
 
     return ProcessingResponse(document_id=doc_id, status="queued", message="Document queued for retry.")
+
+
+# =============================================================================
+# PROFILE MANAGEMENT API (TASK-002)
+# =============================================================================
+
+@app.post(
+    "/profiles",
+    response_model=ExtractionProfile,
+    status_code=201,
+    tags=["Profile Management"],
+    summary="Create extraction profile",
+    description="""
+    Create a new extraction profile for structured field extraction.
+
+    Profiles define what fields to extract from specific document types (invoices, receipts, etc.).
+
+    **Example:**
+    ```json
+    {
+        "name": "acme-invoice",
+        "display_name": "ACME Corp Invoice",
+        "document_type": "invoice",
+        "fields": [
+            {
+                "name": "invoice_number",
+                "label": "Invoice Number",
+                "field_type": "text",
+                "required": true,
+                "strategy": "keyword",
+                "keyword_rule": {
+                    "keyword": "Invoice #:",
+                    "direction": "right",
+                    "max_distance": 150
+                }
+            },
+            {
+                "name": "total_amount",
+                "label": "Total Amount",
+                "field_type": "currency",
+                "required": true,
+                "strategy": "keyword",
+                "keyword_rule": {
+                    "keyword": "Total:",
+                    "direction": "right",
+                    "pattern": "\\\\$?([0-9,]+\\\\.\\\\d{2})"
+                },
+                "min_value": 0.0
+            }
+        ]
+    }
+    ```
+    """
+)
+async def create_extraction_profile(
+    profile: ExtractionProfile,
+    username: str = Depends(verify_credentials)
+):
+    """Create a new extraction profile."""
+    # Check if profile name already exists
+    existing = get_profile_by_name(profile.name)
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Profile with name '{profile.name}' already exists")
+
+    # Set created_by if not provided
+    if not profile.created_by:
+        profile.created_by = username
+
+    # Create profile
+    profile_dict = profile.model_dump()
+    record = create_profile(profile_dict)
+
+    # Create initial version
+    create_profile_version(
+        record.id,
+        version=1,
+        schema_dict=profile_dict,
+        created_by=username,
+        change_description="Initial version"
+    )
+
+    # Convert record to ExtractionProfile for response
+    return record_to_profile(record)
+
+
+@app.get(
+    "/profiles",
+    response_model=list[ExtractionProfile],
+    tags=["Profile Management"],
+    summary="List extraction profiles",
+    description="List all extraction profiles with optional filtering by document type, organization, template status, etc."
+)
+async def list_extraction_profiles(
+    document_type: Optional[str] = Query(None, description="Filter by document type (invoice, receipt, etc.)"),
+    organization_id: Optional[str] = Query(None, description="Filter by organization"),
+    is_template: Optional[bool] = Query(None, description="Filter by template status"),
+    active_only: bool = Query(True, description="Only return active profiles"),
+    limit: int = Query(100, le=500, description="Maximum results to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    username: str = Depends(verify_credentials)
+):
+    """List extraction profiles with optional filters."""
+    records = list_profiles(
+        document_type=document_type,
+        organization_id=organization_id,
+        is_template=is_template,
+        active_only=active_only,
+        limit=limit,
+        offset=offset
+    )
+
+    # Convert records to ExtractionProfile models
+    return records_to_profiles(records)
+
+
+@app.get(
+    "/profiles/{profile_id}",
+    response_model=ExtractionProfile,
+    tags=["Profile Management"],
+    summary="Get profile by ID",
+    description="Retrieve a specific extraction profile by its ID."
+)
+async def get_extraction_profile(
+    profile_id: int,
+    username: str = Depends(verify_credentials)
+):
+    """Get a specific extraction profile by ID."""
+    record = get_profile_by_id(profile_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if not record.is_active:
+        raise HTTPException(status_code=404, detail="Profile is inactive")
+
+    return record_to_profile(record)
+
+
+@app.get(
+    "/profiles/by-name/{name}",
+    response_model=ExtractionProfile,
+    tags=["Profile Management"],
+    summary="Get profile by name",
+    description="Retrieve a specific extraction profile by its unique name."
+)
+async def get_extraction_profile_by_name(
+    name: str,
+    username: str = Depends(verify_credentials)
+):
+    """Get a specific extraction profile by name."""
+    record = get_profile_by_name(name)
+    if not record:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if not record.is_active:
+        raise HTTPException(status_code=404, detail="Profile is inactive")
+
+    return record_to_profile(record)
+
+
+@app.put(
+    "/profiles/{profile_id}",
+    response_model=ExtractionProfile,
+    tags=["Profile Management"],
+    summary="Update extraction profile",
+    description="""
+    Update an existing profile (creates new version).
+
+    Changes are versioned - previous versions remain accessible for rollback.
+    """
+)
+async def update_extraction_profile(
+    profile_id: int,
+    profile: ExtractionProfile,
+    change_description: Optional[str] = Query(None, description="Description of changes"),
+    username: str = Depends(verify_credentials)
+):
+    """Update an existing profile (creates new version)."""
+    existing = get_profile_by_id(profile_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    # Increment version
+    new_version = existing.version + 1
+    profile.version = new_version
+    profile.id = profile_id
+
+    # Update profile
+    profile_dict = profile.model_dump()
+    record = update_profile(profile_id, profile_dict)
+
+    # Create version snapshot
+    create_profile_version(
+        profile_id,
+        version=new_version,
+        schema_dict=profile_dict,
+        created_by=username,
+        change_description=change_description or f"Updated to version {new_version}"
+    )
+
+    return record_to_profile(record)
+
+
+@app.delete(
+    "/profiles/{profile_id}",
+    status_code=204,
+    tags=["Profile Management"],
+    summary="Delete extraction profile",
+    description="""
+    Delete or deactivate a profile.
+
+    - `hard_delete=False` (default): Sets is_active=False, preserves data
+    - `hard_delete=True`: Permanently deletes profile and versions
+    """
+)
+async def delete_extraction_profile(
+    profile_id: int,
+    hard_delete: bool = Query(False, description="Permanently delete (true) or deactivate (false)"),
+    username: str = Depends(verify_credentials)
+):
+    """Delete or deactivate a profile."""
+    existing = get_profile_by_id(profile_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    delete_profile(profile_id, hard_delete=hard_delete)
+    return None  # 204 No Content
+
+
+@app.get(
+    "/profiles/{profile_id}/versions",
+    response_model=list[ProfileVersion],
+    tags=["Profile Management"],
+    summary="Get profile version history",
+    description="Get all versions of a profile for audit trail and rollback."
+)
+async def get_extraction_profile_versions(
+    profile_id: int,
+    username: str = Depends(verify_credentials)
+):
+    """Get version history for a profile."""
+    existing = get_profile_by_id(profile_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    version_records = get_profile_versions(profile_id)
+
+    # Convert to ProfileVersion models
+    versions = []
+    for record in version_records:
+        schema = record.get_schema()
+        versions.append(ProfileVersion(
+            id=record.id,
+            profile_id=record.profile_id,
+            version=record.version,
+            profile_schema=schema,
+            created_by=record.created_by,
+            change_description=record.change_description,
+            created_at=record.created_at
+        ))
+
+    return versions
+
+
+@app.post(
+    "/profiles/{profile_id}/rollback/{version}",
+    response_model=ExtractionProfile,
+    tags=["Profile Management"],
+    summary="Rollback profile to previous version",
+    description="Rollback profile to a previous version (creates a new version with the old schema)."
+)
+async def rollback_extraction_profile(
+    profile_id: int,
+    version: int,
+    username: str = Depends(verify_credentials)
+):
+    """Rollback profile to a previous version."""
+    existing = get_profile_by_id(profile_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    old_version_record = get_profile_version(profile_id, version)
+    if not old_version_record:
+        raise HTTPException(status_code=404, detail=f"Version {version} not found")
+
+    # Get old schema and create new version with it
+    old_schema = old_version_record.get_schema()
+    new_version = existing.version + 1
+    old_schema['version'] = new_version
+
+    # Update profile
+    record = update_profile(profile_id, old_schema)
+
+    # Create version snapshot
+    create_profile_version(
+        profile_id,
+        version=new_version,
+        schema_dict=old_schema,
+        created_by=username,
+        change_description=f"Rolled back to version {version}"
+    )
+
+    return record_to_profile(record)
+
+
+@app.get(
+    "/profiles/{profile_id}/stats",
+    tags=["Profile Management"],
+    summary="Get profile usage statistics",
+    description="Get usage statistics for a profile including success rate, average confidence, and processing times."
+)
+async def get_extraction_profile_stats(
+    profile_id: int,
+    days: int = Query(30, le=365, description="Number of days to look back"),
+    username: str = Depends(verify_credentials)
+):
+    """Get usage statistics for a profile."""
+    existing = get_profile_by_id(profile_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    stats = get_profile_usage_stats(profile_id, days=days)
+
+    return {
+        "profile_id": profile_id,
+        "profile_name": existing.name,
+        "stats_period_days": days,
+        **stats
+    }
 
 
 # =============================================================================

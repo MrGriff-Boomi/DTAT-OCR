@@ -6,17 +6,20 @@
 
 Swiss Army Knife document processor with OCR fallback. Handles PDFs, Excel, CSV, Word, and images with automatic retry logic and quality scoring.
 
+**Drop-in replacement for AWS Textract, Google Cloud Vision, and Azure Computer Vision** - outputs in industry-standard formats for seamless migration.
+
 ## Features
 
-- **Multi-format support**: PDF, XLSX, CSV, DOCX, JPG, PNG, TIFF, and more
-- **Intelligent extraction ladder**: Tries cheap methods first, escalates on failure
-- **Quality scoring**: Automatically detects failed extractions and retries
-- **LightOnOCR integration**: Local AI-powered OCR for scanned documents
-- **Web UI**: Drag-and-drop processing, document viewer, and settings
-- **REST API**: Easy integration with existing systems
-- **HTTP Basic Authentication**: Secure access control for all endpoints
-- **Docker ready**: CPU and GPU images available
-- **Fully permissive licensing**: All dependencies are MIT/BSD/Apache 2.0
+- **🎯 Multi-format OCR output**: Textract, Google Vision, Azure OCR, or DTAT native format
+- **📄 Multi-format document support**: PDF, XLSX, CSV, DOCX, JPG, PNG, TIFF, and more
+- **🎢 Intelligent extraction ladder**: Tries cheap methods first, escalates on failure
+- **✅ Quality scoring**: Automatically detects failed extractions and retries
+- **🤖 LightOnOCR integration**: Local AI-powered OCR for scanned documents
+- **🌐 Web UI**: Drag-and-drop processing, document viewer, and settings
+- **🔌 REST API**: Easy integration with existing systems
+- **🔒 HTTP Basic Authentication**: Secure access control for all endpoints
+- **🐳 Docker ready**: CPU and GPU images available
+- **⚖️ Fully permissive licensing**: All dependencies are MIT/BSD/Apache 2.0
 
 ## Live Demo (AWS Deployment)
 
@@ -55,6 +58,163 @@ Document In
 ┌─────────────────────────────────────┐
 │ Dead Letter Queue                   │  Manual review
 └─────────────────────────────────────┘
+```
+
+## Multi-Format Output Support
+
+**NEW**: DTAT now outputs OCR results in industry-standard formats, making it a drop-in replacement for commercial OCR services.
+
+### Supported Output Formats
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| **Textract** | AWS Textract-compatible | Drop-in Textract replacement, save $1.50/1000 pages |
+| **Google** | Google Cloud Vision-compatible | Migrate from Google Vision OCR |
+| **Azure** | Azure Computer Vision-compatible | Migrate from Azure OCR |
+| **DTAT** | Native format (backward compatible) | Simple text + tables output |
+
+### Format Selection
+
+**API Parameter**:
+```bash
+GET /documents/{id}/content?format=textract
+GET /documents/{id}/content?format=google
+GET /documents/{id}/content?format=azure
+GET /documents/{id}/content?format=dtat
+```
+
+**Default**: Textract format (most common for enterprise use)
+
+### Example Responses
+
+<details>
+<summary><b>Textract Format</b> (AWS-compatible)</summary>
+
+```json
+{
+  "Blocks": [
+    {
+      "BlockType": "LINE",
+      "Id": "block_0",
+      "Text": "Invoice #12345",
+      "Confidence": 95.8,
+      "Geometry": {
+        "BoundingBox": {
+          "Left": 0.05,
+          "Top": 0.1,
+          "Width": 0.3,
+          "Height": 0.02
+        },
+        "Polygon": [
+          {"X": 0.05, "Y": 0.1},
+          {"X": 0.35, "Y": 0.1},
+          {"X": 0.35, "Y": 0.12},
+          {"X": 0.05, "Y": 0.12}
+        ]
+      },
+      "Page": 1
+    }
+  ],
+  "DocumentMetadata": {
+    "Pages": 1
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>Google Vision Format</b></summary>
+
+```json
+{
+  "textAnnotations": [
+    {
+      "description": "Invoice #12345\nDate: 2024-01-15",
+      "boundingPoly": {
+        "vertices": [
+          {"x": 50, "y": 100},
+          {"x": 350, "y": 100},
+          {"x": 350, "y": 120},
+          {"x": 50, "y": 120}
+        ]
+      }
+    }
+  ],
+  "fullTextAnnotation": {
+    "text": "Invoice #12345\nDate: 2024-01-15",
+    "pages": [...]
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>Azure OCR Format</b></summary>
+
+```json
+{
+  "status": "succeeded",
+  "analyzeResult": {
+    "version": "3.2",
+    "readResults": [
+      {
+        "page": 1,
+        "width": 1000,
+        "height": 1000,
+        "lines": [
+          {
+            "text": "Invoice #12345",
+            "boundingBox": [50, 100, 350, 100, 350, 120, 50, 120],
+            "words": [...]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>DTAT Native Format</b> (Simple)</summary>
+
+```json
+{
+  "status": "completed",
+  "extracted_text": "Invoice #12345\nDate: 2024-01-15\nTotal: $1,234.56",
+  "extracted_tables": [],
+  "confidence_score": 95.8,
+  "page_count": 1,
+  "metadata": {
+    "extraction_method": "native",
+    "processing_time_ms": 250
+  }
+}
+```
+</details>
+
+### Migration Examples
+
+**From AWS Textract**:
+```python
+# Before (AWS Textract)
+textract = boto3.client('textract')
+response = textract.detect_document_text(Document={'S3Object': {'Bucket': 'my-bucket', 'Name': 'doc.pdf'}})
+
+# After (DTAT)
+response = requests.get('http://dtat-server:8000/documents/123/content?format=textract', auth=auth)
+# Same JSON structure - no code changes needed!
+```
+
+**From Google Cloud Vision**:
+```python
+# Before (Google Vision)
+client = vision.ImageAnnotatorClient()
+response = client.text_detection(image=image)
+
+# After (DTAT)
+response = requests.get('http://dtat-server:8000/documents/123/content?format=google', auth=auth)
+# Same JSON structure!
 ```
 
 ## Quick Start
@@ -135,9 +295,11 @@ python worker.py config --disable-textract
 | `/process/async` | POST | Upload & queue (async) |
 | `/documents` | GET | List all documents |
 | `/documents/{id}` | GET | Get document metadata |
-| `/documents/{id}/content` | GET | Get extracted text/tables |
+| `/documents/{id}/content?format={format}` | GET | Get extracted content in specified format |
 | `/documents/{id}/retry` | POST | Retry failed document |
 | `/dlq` | GET | View dead letter queue |
+
+**Format Parameter**: `textract` (default), `google`, `azure`, or `dtat`
 
 ### Example API Calls
 
@@ -153,8 +315,14 @@ curl -X POST http://localhost:8000/process \
 curl -X POST http://localhost:8000/process/async \
   -F "file=@document.pdf"
 
-# Get extracted content (with auth)
-curl -u "username:password" http://localhost:8000/documents/1/content
+# Get extracted content in different formats
+curl -u "admin:password" "http://localhost:8000/documents/1/content?format=textract"
+curl -u "admin:password" "http://localhost:8000/documents/1/content?format=google"
+curl -u "admin:password" "http://localhost:8000/documents/1/content?format=azure"
+curl -u "admin:password" "http://localhost:8000/documents/1/content?format=dtat"
+
+# List all documents
+curl -u "admin:password" http://localhost:8000/documents
 ```
 
 ## Authentication
@@ -278,7 +446,8 @@ DTAT-OCR/
 ├── api.py                    # FastAPI REST endpoints + Web UI
 ├── config.py                 # Configuration and feature toggles
 ├── database.py               # SQLAlchemy models, base64 storage
-├── extraction_pipeline.py    # Retry logic, quality scoring, escalation
+├── extraction_pipeline.py    # Retry logic, quality scoring, escalation, normalized format
+├── formatters.py             # Multi-format output converters (NEW)
 ├── worker.py                 # CLI for processing
 ├── document_processor.py     # Multi-format processor
 │
@@ -288,8 +457,16 @@ DTAT-OCR/
 │   ├── documents.html        # Document list page
 │   └── settings.html         # Configuration page
 │
-├── docs/adr/                 # Architecture Decision Records
-│   └── 001-replace-pymupdf-with-pdfplumber.md
+├── docs/
+│   ├── adr/                  # Architecture Decision Records
+│   │   └── 001-replace-pymupdf-with-pdfplumber.md
+│   ├── tasks/                # Task planning documents
+│   │   ├── README.md         # Task roadmap
+│   │   ├── TASK-001-Multi-Format-Output-Support.md
+│   │   ├── TASK-002-Profile-Schema-Management-System.md
+│   │   ├── TASK-003-Structured-Field-Extraction.md
+│   │   └── TASK-004-Batch-Processing-Support.md
+│   └── OCR-API-FORMATS.md    # Format specifications and comparisons
 │
 ├── Dockerfile                # CPU Docker image
 ├── Dockerfile.gpu            # GPU Docker image (CUDA)
@@ -299,9 +476,20 @@ DTAT-OCR/
 
 ## Roadmap
 
-### Current Status: MVP Complete
+### Current Status: Enhanced MVP
 
-The core document processing pipeline is fully functional for local and Docker deployments.
+The core document processing pipeline is fully functional with multi-format output support.
+
+**✅ Completed Features**:
+- Multi-format output (Textract, Google Vision, Azure OCR compatible)
+- Drop-in replacement for commercial OCR services
+- Normalized internal format for future features
+- Backward-compatible DTAT native format
+
+**🚧 In Progress** (See `docs/tasks/` for details):
+- TASK-002: Profile & Schema Management System (user-defined extraction profiles)
+- TASK-003: Structured Field Extraction (AWS Bedrock LLM integration)
+- TASK-004: Batch Processing Support (100+ docs in single request)
 
 ### Planned Features: AWS Production Deployment
 

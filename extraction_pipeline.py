@@ -23,6 +23,288 @@ from database import (
 )
 
 
+# ==============================================================================
+# Normalized Data Structures (Multi-Format Output Support)
+# ==============================================================================
+
+@dataclass
+class Point:
+    """2D point with normalized coordinates (0.0-1.0)"""
+    x: float
+    y: float
+
+    def to_dict(self):
+        return {"x": self.x, "y": self.y}
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(x=data["x"], y=data["y"])
+
+
+@dataclass
+class BoundingBox:
+    """Normalized bounding box (0.0-1.0 coordinates)"""
+    left: float
+    top: float
+    width: float
+    height: float
+
+    def to_dict(self):
+        return {
+            "left": self.left,
+            "top": self.top,
+            "width": self.width,
+            "height": self.height
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            left=data["left"],
+            top=data["top"],
+            width=data["width"],
+            height=data["height"]
+        )
+
+
+@dataclass
+class NormalizedGeometry:
+    """Geometry information with normalized coordinates"""
+    bounding_box: BoundingBox
+    polygon: list  # List[Point] - corners of the text region
+
+    def to_dict(self):
+        return {
+            "bounding_box": self.bounding_box.to_dict(),
+            "polygon": [p.to_dict() for p in self.polygon]
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            bounding_box=BoundingBox.from_dict(data["bounding_box"]),
+            polygon=[Point.from_dict(p) for p in data["polygon"]]
+        )
+
+
+@dataclass
+class BlockRelationship:
+    """Relationship between blocks (e.g., LINE contains WORDs)"""
+    type: str  # "CHILD", "VALUE", "TITLE"
+    ids: list  # List of related block IDs
+
+    def to_dict(self):
+        return {"type": self.type, "ids": self.ids}
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(type=data["type"], ids=data["ids"])
+
+
+@dataclass
+class NormalizedBlock:
+    """
+    Internal block format (inspired by AWS Textract structure).
+    Represents a single text element (word, line, page, table, cell).
+    """
+    id: str
+    block_type: str  # WORD, LINE, PAGE, TABLE, CELL
+    text: Optional[str]
+    confidence: float  # 0-100
+    geometry: NormalizedGeometry
+    page: int
+    relationships: list = None  # List[BlockRelationship]
+
+    def __post_init__(self):
+        if self.relationships is None:
+            self.relationships = []
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "block_type": self.block_type,
+            "text": self.text,
+            "confidence": self.confidence,
+            "geometry": self.geometry.to_dict(),
+            "page": self.page,
+            "relationships": [r.to_dict() for r in self.relationships]
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            id=data["id"],
+            block_type=data["block_type"],
+            text=data.get("text"),
+            confidence=data["confidence"],
+            geometry=NormalizedGeometry.from_dict(data["geometry"]),
+            page=data["page"],
+            relationships=[BlockRelationship.from_dict(r) for r in data.get("relationships", [])]
+        )
+
+
+@dataclass
+class DocumentMetadata:
+    """Metadata about the processed document"""
+    pages: int
+    extraction_method: Optional[str] = None
+    processing_time_ms: Optional[int] = None
+
+    def to_dict(self):
+        return {
+            "pages": self.pages,
+            "extraction_method": self.extraction_method,
+            "processing_time_ms": self.processing_time_ms
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            pages=data["pages"],
+            extraction_method=data.get("extraction_method"),
+            processing_time_ms=data.get("processing_time_ms")
+        )
+
+
+@dataclass
+class NormalizedResult:
+    """
+    Complete extraction result in normalized format.
+    This is the internal format used by DTAT - all formatters convert from this.
+    """
+    blocks: list  # List[NormalizedBlock]
+    document_metadata: DocumentMetadata
+    page_count: int
+    confidence_score: float  # Overall 0-100
+
+    def to_dict(self):
+        return {
+            "blocks": [b.to_dict() for b in self.blocks],
+            "document_metadata": self.document_metadata.to_dict(),
+            "page_count": self.page_count,
+            "confidence_score": self.confidence_score
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            blocks=[NormalizedBlock.from_dict(b) for b in data["blocks"]],
+            document_metadata=DocumentMetadata.from_dict(data["document_metadata"]),
+            page_count=data["page_count"],
+            confidence_score=data["confidence_score"]
+        )
+
+
+# ==============================================================================
+# Conversion Helper
+# ==============================================================================
+
+def convert_extraction_result_to_normalized(
+    extraction_result,
+    page_count: int = 1
+) -> NormalizedResult:
+    """
+    Convert legacy ExtractionResult to new NormalizedResult format.
+
+    This maintains backward compatibility while enabling multi-format output.
+
+    Args:
+        extraction_result: Legacy ExtractionResult object
+        page_count: Number of pages in document
+
+    Returns:
+        NormalizedResult with blocks created from text lines
+    """
+    blocks = []
+    block_id = 0
+
+    # Split text into lines and create LINE blocks
+    text_lines = extraction_result.text_content.split('\n')
+
+    for line_idx, line_text in enumerate(text_lines):
+        if not line_text.strip():
+            continue  # Skip empty lines
+
+        # Create a LINE block
+        # Note: We don't have actual coordinates yet, so we approximate
+        # based on line position. Later we can enhance extraction to provide real coords.
+        line_height = 1.0 / max(len(text_lines), 1)
+        top_position = line_idx * line_height
+
+        # Create simple bounding box (full width, proportional height)
+        bbox = BoundingBox(
+            left=0.05,  # 5% margin from left
+            top=top_position,
+            width=0.90,  # 90% width (5% margins on each side)
+            height=line_height
+        )
+
+        # Create polygon (4 corners of bounding box)
+        polygon = [
+            Point(bbox.left, bbox.top),
+            Point(bbox.left + bbox.width, bbox.top),
+            Point(bbox.left + bbox.width, bbox.top + bbox.height),
+            Point(bbox.left, bbox.top + bbox.height)
+        ]
+
+        geometry = NormalizedGeometry(
+            bounding_box=bbox,
+            polygon=polygon
+        )
+
+        # Determine which page this line is on (rough approximation)
+        lines_per_page = max(len(text_lines) / page_count, 1) if page_count > 1 else len(text_lines)
+        current_page = min(int(line_idx / lines_per_page) + 1, page_count)
+
+        block = NormalizedBlock(
+            id=f"block_{block_id}",
+            block_type="LINE",
+            text=line_text,
+            confidence=extraction_result.confidence_score,
+            geometry=geometry,
+            page=current_page,
+            relationships=[]
+        )
+
+        blocks.append(block)
+        block_id += 1
+
+    # Create PAGE blocks (one per page)
+    for page_num in range(1, page_count + 1):
+        page_block = NormalizedBlock(
+            id=f"page_{page_num}",
+            block_type="PAGE",
+            text=None,
+            confidence=extraction_result.confidence_score,
+            geometry=NormalizedGeometry(
+                bounding_box=BoundingBox(0, 0, 1, 1),  # Full page
+                polygon=[Point(0, 0), Point(1, 0), Point(1, 1), Point(0, 1)]
+            ),
+            page=page_num,
+            relationships=[]
+        )
+        blocks.append(page_block)
+
+    # Create document metadata
+    metadata = DocumentMetadata(
+        pages=page_count,
+        extraction_method=extraction_result.method_used,
+        processing_time_ms=extraction_result.processing_time_ms
+    )
+
+    # Create normalized result
+    return NormalizedResult(
+        blocks=blocks,
+        document_metadata=metadata,
+        page_count=page_count,
+        confidence_score=extraction_result.confidence_score
+    )
+
+
+# ==============================================================================
+# Legacy Extraction Result (for backward compatibility)
+# ==============================================================================
+
 @dataclass
 class ExtractionResult:
     """Result from any extraction method."""
@@ -598,12 +880,12 @@ class ExtractionPipeline:
         document.table_count = len(result.tables)
         document.page_count = result.metadata.get('pages', 1)
 
-        # Store extracted content as base64
-        document.set_extracted_content({
-            "text": result.text_content,
-            "tables": result.tables,
-            "metadata": result.metadata
-        })
+        # Convert to normalized format and store
+        normalized_result = convert_extraction_result_to_normalized(
+            result,
+            page_count=document.page_count
+        )
+        document.set_normalized_content(normalized_result)
 
         update_document(document)
         return document
