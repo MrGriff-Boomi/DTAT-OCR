@@ -243,6 +243,16 @@ class DocumentRecord(Base, Base64JSONMixin):
         """
         return self.get_json_field('extracted_fields_json')
 
+    @property
+    def extracted_fields(self) -> dict:
+        """Property for accessing extracted fields."""
+        return self.get_extracted_fields()
+
+    @extracted_fields.setter
+    def extracted_fields(self, value: dict):
+        """Property setter for extracted fields."""
+        self.set_extracted_fields(value)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -466,6 +476,57 @@ def init_database():
     engine = get_engine()
     Base.metadata.create_all(engine)
     print(f"Database initialized: {config.database_url}")
+
+
+def seed_templates():
+    """
+    Seed built-in templates into the database.
+
+    This function inserts the built-in templates if they don't already exist.
+    Safe to call multiple times - will skip existing templates.
+    """
+    from profile_templates import get_all_templates
+
+    templates = get_all_templates()
+    db = get_session()
+
+    try:
+        seeded = 0
+        skipped = 0
+
+        for template in templates:
+            # Check if template already exists
+            existing = db.query(ExtractionProfileRecord).filter_by(name=template.name).first()
+
+            if existing:
+                skipped += 1
+                continue
+
+            # Create new record
+            record = ExtractionProfileRecord(
+                name=template.name,
+                display_name=template.display_name,
+                description=template.description,
+                document_type=template.document_type,
+                organization_id=template.organization_id,
+                is_template=True,
+                is_active=True,
+                version=1
+            )
+            record.set_schema(template.model_dump(exclude={'id', 'created_at', 'updated_at'}))
+
+            db.add(record)
+            seeded += 1
+
+        db.commit()
+        print(f"Template seeding complete: {seeded} seeded, {skipped} skipped")
+
+    except Exception as e:
+        db.rollback()
+        print(f"Error seeding templates: {e}")
+        raise
+    finally:
+        db.close()
 
 
 def create_document_record(

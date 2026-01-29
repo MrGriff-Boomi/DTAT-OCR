@@ -887,6 +887,10 @@ class ExtractionPipeline:
         )
         document.set_normalized_content(normalized_result)
 
+        # Profile-based extraction (if profile assigned)
+        if document.profile_id:
+            self._extract_with_profile(document, normalized_result)
+
         update_document(document)
         return document
 
@@ -906,3 +910,90 @@ class ExtractionPipeline:
         update_document(document)
         print(f"[DLQ] Document {document.id} needs manual review: {document.error_message}")
         return document
+
+    def _extract_with_profile(
+        self,
+        document: DocumentRecord,
+        ocr_result: dict
+    ) -> None:
+        """
+        Extract structured fields using assigned profile.
+
+        Args:
+            document: Document record with profile_id set
+            ocr_result: Normalized OCR result from extraction
+
+        Side effects:
+            - Sets document.extracted_fields (JSONB)
+            - Logs to profile_usage table
+        """
+        from database import get_profile_by_id, log_profile_usage
+        from extractors import ProfileExtractor
+        from profiles import ExtractionProfile
+
+        start_time = time.time()
+
+        try:
+            # Get profile
+            profile_record = get_profile_by_id(document.profile_id)
+            if not profile_record:
+                print(f"[WARN] Profile {document.profile_id} not found for document {document.id}")
+                return
+
+            # Convert record to ExtractionProfile
+            schema = profile_record.get_schema()
+            schema['id'] = profile_record.id
+            profile = ExtractionProfile(**schema)
+
+            # Extract fields
+            extractor = ProfileExtractor()
+            extraction_results = extractor.extract_all_fields(profile, ocr_result)
+
+            # Store extracted fields
+            document.extracted_fields = extraction_results
+
+            # Calculate statistics
+            stats = extraction_results['statistics']
+            processing_time_ms = int((time.time() - start_time) * 1000)
+
+            # Determine status
+            if stats['failed'] == 0 and stats['extracted'] >= stats['required']:
+                status = 'success'
+            elif stats['extracted'] > 0:
+                status = 'partial'
+            else:
+                status = 'failed'
+
+            # Log usage
+            log_profile_usage(
+                profile_id=document.profile_id,
+                document_id=document.id,
+                fields_extracted=stats['extracted'],
+                fields_failed=stats['failed'],
+                avg_confidence=stats.get('avg_confidence', 0.0),
+                processing_time_ms=processing_time_ms,
+                status=status
+            )
+
+            print(f"[PROFILE] Extracted {stats['extracted']}/{stats['total_fields']} fields from document {document.id}")
+
+        except Exception as e:
+            error_msg = f"Profile extraction failed: {str(e)}"
+            print(f"[ERROR] {error_msg}")
+            print(traceback.format_exc())
+
+            # Log failed usage
+            try:
+                processing_time_ms = int((time.time() - start_time) * 1000)
+                log_profile_usage(
+                    profile_id=document.profile_id,
+                    document_id=document.id,
+                    fields_extracted=0,
+                    fields_failed=0,
+                    avg_confidence=0.0,
+                    processing_time_ms=processing_time_ms,
+                    status='failed',
+                    error_message=error_msg
+                )
+            except:
+                pass  # Don't fail if logging fails

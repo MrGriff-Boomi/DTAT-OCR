@@ -15,6 +15,8 @@ Swiss Army Knife document processor with OCR fallback. Handles PDFs, Excel, CSV,
 - **🎢 Intelligent extraction ladder**: Tries cheap methods first, escalates on failure
 - **✅ Quality scoring**: Automatically detects failed extractions and retries
 - **🤖 LightOnOCR integration**: Local AI-powered OCR for scanned documents
+- **📋 Profile-based extraction**: User-defined extraction profiles with 4 strategies (coordinate, keyword, table, regex)
+- **🎨 Built-in templates**: Pre-configured profiles for invoices, receipts, W-2s, and driver's licenses
 - **🌐 Web UI**: Drag-and-drop processing, document viewer, and settings
 - **🔌 REST API**: Easy integration with existing systems
 - **🔒 HTTP Basic Authentication**: Secure access control for all endpoints

@@ -18,15 +18,22 @@ from config import config, enable_textract, disable_textract
 from database import (
     init_database, DocumentRecord, ProcessingStatus,
     create_document_record, save_document, get_document,
-    get_pending_documents, get_failed_documents, update_document
+    get_pending_documents, get_failed_documents, update_document,
+    get_profile_by_name, get_profile_by_id
 )
 from extraction_pipeline import ExtractionPipeline
 
 
-def process_single_file(file_path: str, output_json: bool = False) -> dict:
+def process_single_file(file_path: str, output_json: bool = False, profile_name: str = None, profile_id: int = None) -> dict:
     """
     Process a single file and return results.
     Good for testing and CLI usage.
+
+    Args:
+        file_path: Path to file
+        output_json: Output as JSON
+        profile_name: Profile name for structured extraction
+        profile_id: Profile ID for structured extraction
     """
     file_path = Path(file_path)
 
@@ -47,6 +54,31 @@ def process_single_file(file_path: str, output_json: bool = False) -> dict:
         source_path=str(file_path.absolute())
     )
 
+    # Resolve profile if specified
+    resolved_profile_id = None
+    if profile_name or profile_id:
+        if profile_name and profile_id:
+            print("[WARN] Both --profile and --profile-id specified. Using --profile-id.")
+
+        if profile_id:
+            profile_record = get_profile_by_id(profile_id)
+            if not profile_record:
+                print(f"[ERROR] Profile ID {profile_id} not found")
+                return {}
+            resolved_profile_id = profile_id
+            print(f"Using profile ID {profile_id}: {profile_record.display_name}")
+        elif profile_name:
+            profile_record = get_profile_by_name(profile_name)
+            if not profile_record:
+                print(f"[ERROR] Profile '{profile_name}' not found")
+                return {}
+            resolved_profile_id = profile_record.id
+            print(f"Using profile '{profile_name}': {profile_record.display_name}")
+
+    # Assign profile to document
+    if resolved_profile_id:
+        record.profile_id = resolved_profile_id
+
     # Save to database
     doc_id = save_document(record)
     record.id = doc_id
@@ -54,6 +86,8 @@ def process_single_file(file_path: str, output_json: bool = False) -> dict:
     print(f"Created document record: ID={doc_id}")
     print(f"File: {file_path.name} ({len(file_bytes) / 1024:.1f} KB)")
     print(f"Type: {file_type}")
+    if resolved_profile_id:
+        print(f"Profile: {resolved_profile_id}")
     print("-" * 50)
 
     # Process
@@ -72,8 +106,9 @@ def process_single_file(file_path: str, output_json: bool = False) -> dict:
             "table_count": result.table_count,
             "page_count": result.page_count,
             "extracted_content_b64": result.extracted_content_b64,
+            "extracted_fields": result.extracted_fields if resolved_profile_id else None,
         }
-        print(json.dumps(output, indent=2))
+        print(json.dumps(output, indent=2, default=str))
     else:
         print(f"\nStatus: {result.status}")
         print(f"Method: {result.extraction_method}")
@@ -84,6 +119,27 @@ def process_single_file(file_path: str, output_json: bool = False) -> dict:
         print(f"Pages: {result.page_count}")
 
         if result.status == ProcessingStatus.COMPLETED.value:
+            # Show extracted fields if profile was used
+            if resolved_profile_id and result.extracted_fields:
+                print(f"\n{'='*50}")
+                print("EXTRACTED FIELDS:")
+                print("="*50)
+                fields = result.extracted_fields.get('fields', {})
+                for field_name, field_data in fields.items():
+                    value = field_data.get('value')
+                    confidence = field_data.get('confidence', 0)
+                    valid = field_data.get('valid', False)
+                    status_icon = "✓" if valid else "✗"
+                    print(f"{status_icon} {field_name}: {value} (confidence: {confidence:.2f})")
+
+                stats = result.extracted_fields.get('statistics', {})
+                print(f"\nExtraction Statistics:")
+                print(f"  Total fields: {stats.get('total_fields', 0)}")
+                print(f"  Extracted: {stats.get('extracted', 0)}")
+                print(f"  Failed: {stats.get('failed', 0)}")
+                print(f"  Validated: {stats.get('validated', 0)}")
+
+            # Show raw text
             content = result.get_extracted_content()
             text = content.get('text', '')
             print(f"\n{'='*50}")
@@ -241,10 +297,15 @@ def main():
     # Init database
     init_parser = subparsers.add_parser("init", help="Initialize database")
 
+    # Seed templates
+    seed_parser = subparsers.add_parser("seed-templates", help="Seed built-in profile templates")
+
     # Process single file
     process_parser = subparsers.add_parser("process", help="Process a single file")
     process_parser.add_argument("file", help="Path to file")
     process_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    process_parser.add_argument("--profile", help="Profile name to use for extraction")
+    process_parser.add_argument("--profile-id", type=int, help="Profile ID to use for extraction")
 
     # Process batch
     batch_parser = subparsers.add_parser("batch", help="Process pending documents")
@@ -271,9 +332,19 @@ def main():
     if args.command == "init":
         init_database()
 
+    elif args.command == "seed-templates":
+        from database import seed_templates
+        init_database()
+        seed_templates()
+
     elif args.command == "process":
         init_database()
-        process_single_file(args.file, output_json=args.json)
+        process_single_file(
+            args.file,
+            output_json=args.json,
+            profile_name=args.profile,
+            profile_id=args.profile_id
+        )
 
     elif args.command == "batch":
         init_database()

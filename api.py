@@ -642,6 +642,124 @@ def process_document_background(doc_id: int, file_bytes: bytes, file_type: str):
         tmp_path.unlink(missing_ok=True)
 
 
+@app.post("/process-with-profile", response_model=DocumentResponse)
+async def process_document_with_profile(
+    file: UploadFile = File(...),
+    profile_id: Optional[int] = Form(None),
+    profile_name: Optional[str] = Form(None),
+    return_format: str = Form("textract"),
+    username: str = Depends(verify_credentials)
+):
+    """
+    Process document with profile-based extraction.
+
+    Performs OCR extraction AND extracts structured fields using the specified profile.
+
+    **Parameters:**
+    - **file**: Document file to process
+    - **profile_id**: Profile ID (use this OR profile_name)
+    - **profile_name**: Profile name (use this OR profile_id)
+    - **return_format**: Output format (textract, google, azure, dtat)
+
+    **Returns:**
+    - Document with both OCR content and extracted fields
+
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8000/process-with-profile \
+      -F "file=@invoice.pdf" \
+      -F "profile_name=template-generic-invoice" \
+      -F "return_format=textract" \
+      -u "admin:password"
+    ```
+    """
+    # Validate profile specification
+    if not profile_id and not profile_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Must specify either profile_id or profile_name"
+        )
+
+    if profile_id and profile_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Specify only one: profile_id OR profile_name"
+        )
+
+    # Resolve profile
+    if profile_name:
+        profile_record = get_profile_by_name(profile_name)
+        if not profile_record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Profile '{profile_name}' not found"
+            )
+        profile_id = profile_record.id
+    else:
+        profile_record = get_profile_by_id(profile_id)
+        if not profile_record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Profile ID {profile_id} not found"
+            )
+
+    # Read file
+    contents = await file.read()
+    if len(contents) > config.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max: {config.max_file_size_mb}MB"
+        )
+
+    filename = file.filename or "unknown"
+    file_type = Path(filename).suffix.lower().lstrip('.')
+
+    if not file_type:
+        raise HTTPException(status_code=400, detail="Could not determine file type")
+
+    # Create document record with profile_id
+    record = create_document_record(filename=filename, file_bytes=contents, file_type=file_type)
+    record.profile_id = profile_id  # Assign profile before processing
+    doc_id = save_document(record)
+
+    # Process synchronously with temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type}") as tmp:
+        tmp.write(contents)
+        tmp_path = Path(tmp.name)
+
+    try:
+        # Reload record to get ID
+        record = get_document(doc_id)
+
+        # Process through pipeline (will auto-extract fields if profile_id set)
+        pipeline = ExtractionPipeline()
+        record = pipeline.process(record, tmp_path)
+
+        # Build response with extracted fields
+        response = DocumentResponse(
+            id=record.id,
+            source_filename=record.source_filename,
+            file_type=record.file_type,
+            status=record.status,
+            extraction_method=record.extraction_method,
+            confidence_score=record.confidence_score,
+            page_count=record.page_count,
+            char_count=record.char_count,
+            table_count=record.table_count,
+            processing_time_ms=record.processing_time_ms,
+            created_at=record.created_at.isoformat() if record.created_at else None,
+            completed_at=record.completed_at.isoformat() if record.completed_at else None,
+            error_message=record.error_message,
+            profile_id=record.profile_id,
+            extracted_fields=record.extracted_fields  # Include structured fields
+        )
+
+        return response
+
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 @app.get("/documents/{doc_id}", response_model=DocumentResponse)
 async def get_document_by_id(
     doc_id: int,
@@ -851,6 +969,84 @@ async def get_document_content(
     formatted_content = formatter.format(normalized_result)
 
     return formatted_content
+
+
+@app.get(
+    "/documents/{doc_id}/extracted-fields",
+    tags=["Documents", "Profile Extraction"],
+    summary="Get structured extracted fields",
+    description="""
+    Get structured fields extracted using a profile.
+
+    Returns the fields, values, confidence scores, and validation status
+    from profile-based extraction.
+
+    **Returns 404 if:**
+    - Document doesn't exist
+    - Document wasn't processed with a profile
+
+    **Example Response:**
+    ```json
+    {
+        "profile_name": "template-generic-invoice",
+        "profile_id": 1,
+        "document_id": 123,
+        "fields": {
+            "invoice_number": {
+                "value": "INV-12345",
+                "raw_value": "INV-12345",
+                "confidence": 0.95,
+                "valid": true,
+                "field_type": "text",
+                "strategy": "keyword_proximity",
+                "location": {"page": 1, "x": 0.1, "y": 0.2}
+            },
+            "total_amount": {
+                "value": 1234.56,
+                "raw_value": "$1,234.56",
+                "confidence": 0.94,
+                "valid": true,
+                "field_type": "currency",
+                "strategy": "keyword_proximity"
+            }
+        },
+        "statistics": {
+            "total_fields": 5,
+            "extracted": 5,
+            "failed": 0,
+            "validated": 5,
+            "validation_failed": 0
+        }
+    }
+    ```
+    """
+)
+async def get_extracted_fields(
+    doc_id: int,
+    username: str = Depends(verify_credentials)
+):
+    """Get structured fields extracted from document using profile."""
+    record = get_document(doc_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if not record.profile_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Document was not processed with a profile"
+        )
+
+    if not record.extracted_fields:
+        raise HTTPException(
+            status_code=404,
+            detail="No extracted fields found. Document may still be processing."
+        )
+
+    return {
+        "document_id": record.id,
+        "profile_id": record.profile_id,
+        "extracted_fields": record.extracted_fields
+    }
 
 
 @app.get("/documents")
@@ -1296,6 +1492,98 @@ async def get_extraction_profile_stats(
         "stats_period_days": days,
         **stats
     }
+
+
+# =============================================================================
+# TEMPLATE ENDPOINTS
+# =============================================================================
+
+@app.get(
+    "/templates",
+    tags=["Templates"],
+    summary="List built-in templates",
+    description="Get all built-in profile templates for common document types."
+)
+async def list_built_in_templates():
+    """List all built-in profile templates."""
+    from profile_templates import get_all_templates
+    templates = get_all_templates()
+    return templates
+
+
+@app.get(
+    "/templates/{template_name}",
+    tags=["Templates"],
+    summary="Get template by name",
+    description="Get a specific built-in template by its name."
+)
+async def get_template(template_name: str):
+    """Get a built-in template by name."""
+    from profile_templates import get_template_by_name
+    template = get_template_by_name(template_name)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Template '{template_name}' not found")
+    return template
+
+
+@app.post(
+    "/templates/{template_name}/instantiate",
+    tags=["Templates"],
+    summary="Create profile from template",
+    description="Create a new profile by instantiating a built-in template with customizations.",
+    status_code=201
+)
+async def instantiate_template_endpoint(
+    template_name: str,
+    new_name: str = Query(..., description="Name for the new profile"),
+    customizations: Dict[str, Any] = Body(default={}),
+    username: str = Depends(verify_credentials)
+):
+    """
+    Create a new profile from a built-in template.
+
+    The template is cloned and customized with the provided fields.
+    The new profile is saved to the database and can be used immediately.
+
+    Example:
+        POST /templates/template-generic-invoice/instantiate?new_name=acme-invoice
+        {
+            "display_name": "Acme Corp Invoice",
+            "organization_id": "org-123",
+            "description": "Custom invoice format for Acme Corp"
+        }
+    """
+    from profile_templates import instantiate_template
+
+    try:
+        # Create profile from template
+        new_profile = instantiate_template(
+            template_name=template_name,
+            new_name=new_name,
+            customizations=customizations
+        )
+
+        # Save to database
+        record = create_profile(new_profile)
+
+        # Return the created profile
+        return record_to_profile(record)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get(
+    "/templates/by-type/{document_type}",
+    tags=["Templates"],
+    summary="Get templates by document type",
+    description="Get all templates for a specific document type (invoice, receipt, tax_form, identification)."
+)
+async def get_templates_by_type(document_type: str):
+    """Get templates filtered by document type."""
+    from profile_templates import get_templates_by_document_type
+    templates = get_templates_by_document_type(document_type)
+    return templates
 
 
 # =============================================================================
