@@ -8,7 +8,7 @@
 
 ## Overview
 
-Phase 7 successfully integrated profile-based extraction into the document processing pipeline. However, comprehensive code reviews identified **7 critical issues**, **13 high-priority improvements**, and **45+ missing test scenarios** that must be addressed before production deployment.
+Phase 7 successfully integrated profile-based extraction into the document processing pipeline. However, comprehensive code reviews identified **9 critical issues**, **13 high-priority improvements**, and **45+ missing test scenarios** that must be addressed before production deployment.
 
 This task tracks all follow-up work required to bring Phase 7 to production-ready quality.
 
@@ -346,9 +346,181 @@ except Exception as e:  # ← Only catch normal exceptions
 
 ---
 
+### Issue #8: ReDoS Vulnerability (Regular Expression Denial of Service)
+**Severity:** 🔴 Critical - Security
+**File:** `extractors.py` lines 198, 454; `profiles.py` lines 103, 106
+**Impact:** Malicious regex patterns can freeze entire application
+**Effort:** 2-3 hours
+
+**Problem:**
+User-supplied regex patterns from profile definitions are executed without validation or timeout controls:
+```python
+# extractors.py:198, 454
+match = re.search(rule.pattern, text)  # User-controlled pattern, no timeout
+match = re.search(pattern, text)       # Could cause catastrophic backtracking
+```
+
+**Attack Scenario:**
+```python
+# Malicious profile with ReDoS pattern
+profile = {
+    "fields": [{
+        "strategy": "regex",
+        "regex_pattern": r"(a+)+$",  # Catastrophic backtracking
+        "validation_pattern": r"(x+x+)+y"
+    }]
+}
+# Processing a document with "aaaaaaaaaaaaaaaaaX" would freeze for minutes/hours
+```
+
+**Fix:**
+```python
+import re
+import signal
+from contextlib import contextmanager
+
+# Add regex timeout (Unix/Linux)
+@contextmanager
+def time_limit(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutError("Regex timeout")
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+
+# Validate regex patterns before use
+def validate_regex_safety(pattern: str) -> tuple[bool, str]:
+    """Check regex for dangerous patterns."""
+    dangerous = [
+        r'\(\w+\)\+',  # (x+)+
+        r'\(\w+\)\*',  # (x*)*
+        r'\(\.\*\)\+', # (.*)+
+        r'\(\.\+\)\+', # (.+)+
+    ]
+    for danger in dangerous:
+        if re.search(danger, pattern):
+            return False, f"Potentially dangerous regex: {danger}"
+
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        return False, f"Invalid regex: {e}"
+
+    return True, ""
+
+# Apply in extractors
+def extract(self, field_def, ocr_result, page):
+    pattern = field_def.regex_pattern
+
+    # Validate before use
+    is_safe, error = validate_regex_safety(pattern)
+    if not is_safe:
+        return None, 0.0, None
+
+    try:
+        with time_limit(1):  # 1 second max
+            match = re.search(pattern, text)
+    except TimeoutError:
+        logger.warning(f"Regex timeout for pattern: {pattern}")
+        return None, 0.0, None
+```
+
+**Test:**
+- Create profile with pattern `(a+)+$`
+- Process document with "aaaaaaaaaa"
+- Verify timeout occurs within 1 second
+- Verify application remains responsive
+
+---
+
+### Issue #9: Database Session Leaks
+**Severity:** 🔴 Critical - Database
+**File:** `database.py` lines 554-574
+**Impact:** Connection pool exhaustion, application freeze under load
+**Effort:** 1-2 hours
+
+**Problem:**
+```python
+# database.py:554-574
+def save_document(record: DocumentRecord) -> int:
+    session = get_session()
+    try:
+        session.add(record)
+        session.commit()  # If this fails, no rollback!
+        return record.id
+    finally:
+        session.close()  # Only closes, doesn't rollback
+
+def update_document(record: DocumentRecord):
+    session = get_session()
+    try:
+        session.merge(record)
+        session.commit()  # If this fails, transaction stays open
+    finally:
+        session.close()
+```
+
+**Issues:**
+- If `commit()` raises exception, transaction not rolled back
+- Uncommitted transactions accumulate in connection pool
+- Under load (50+ concurrent requests), connection pool exhausted
+- Application freezes waiting for available connections
+
+**Fix:**
+```python
+def save_document(record: DocumentRecord) -> int:
+    session = get_session()
+    try:
+        session.add(record)
+        session.commit()
+        return record.id
+    except Exception:
+        session.rollback()  # Add rollback
+        raise
+    finally:
+        session.close()
+
+def update_document(record: DocumentRecord):
+    session = get_session()
+    try:
+        session.merge(record)
+        session.commit()
+    except Exception:
+        session.rollback()  # Add rollback
+        raise
+    finally:
+        session.close()
+```
+
+**Also add connection pooling config:**
+```python
+# database.py get_engine()
+_engine = create_engine(
+    config.database_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=10,        # Max persistent connections
+    max_overflow=20,     # Max temporary connections
+    pool_timeout=30,     # Wait max 30s for connection
+    pool_recycle=3600    # Recycle connections after 1 hour
+)
+```
+
+**Test:**
+- Mock `session.commit()` to raise exception
+- Verify `save_document()` calls rollback
+- Process 100 documents concurrently
+- Monitor connection pool: `SELECT count(*) FROM pg_stat_activity`
+- Verify no connection leaks
+
+---
+
 ## 🟡 High-Priority Issues (Week 2-3)
 
-### Issue #8: No API Endpoint Tests
+### Issue #12: No API Endpoint Tests
 **Severity:** 🟡 High
 **Files:** None (tests missing)
 **Impact:** REST interface completely untested
@@ -390,7 +562,7 @@ test_phase7_api.py - 15+ tests needed:
 
 ---
 
-### Issue #9: Code Duplication - Profile Resolution
+### Issue #13: Code Duplication - Profile Resolution
 **Severity:** 🟡 High
 **Files:** `worker.py:58-76`, `api.py:676-704`
 **Impact:** Maintenance burden, inconsistent behavior
@@ -456,7 +628,7 @@ Then update both callers to use this function.
 
 ---
 
-### Issue #10: No Proper Logging
+### Issue #14: No Proper Logging
 **Severity:** 🟡 High
 **Files:** `extraction_pipeline.py`, `worker.py`, multiple locations
 **Impact:** Production debugging will be difficult
@@ -544,7 +716,7 @@ logging.config.dictConfig(LOGGING_CONFIG)
 
 ---
 
-### Issue #11: No Transaction Rollback
+### Issue #15: No Transaction Rollback
 **Severity:** 🟡 High
 **File:** `extraction_pipeline.py:890-894`
 **Impact:** Partial data persisted on failure
@@ -621,7 +793,7 @@ def _finalize_success(self, document, result, levels_tried):
 
 ---
 
-### Issue #12: Database Session Management
+### Issue #16: Database Session Management
 **Severity:** 🟡 High
 **Files:** `database.py` multiple functions
 **Impact:** Connection leaks, resource exhaustion
@@ -689,7 +861,7 @@ def create_profile(profile_dict: dict):
 
 ---
 
-### Issue #13: Profile Version Race Condition
+### Issue #17: Profile Version Race Condition
 **Severity:** 🟡 High
 **File:** `api.py:1343-1364`
 **Impact:** Concurrent updates could violate unique constraint
@@ -1049,27 +1221,31 @@ Usage: `GET /documents/123/extracted-fields?fields=invoice_number,total_amount`
 ## 📊 Progress Tracking
 
 ### Week 1: Critical Fixes
-- [ ] Issue #1: Add Form import (5 min)
-- [ ] Issue #2: Fix response model (2 hrs)
-- [ ] Issue #3: Add document validation (15 min)
-- [ ] Issue #4: Fix circular imports (4-6 hrs)
-- [ ] Issue #5: Fix type mismatch (1-2 hrs)
-- [ ] Issue #6: Fix tempfile leaks (1 hr)
-- [ ] Issue #7: Fix bare except (5 min)
+- [x] Issue #1: Add Form import (5 min) - DONE
+- [x] Issue #2: Add Body import (5 min) - DONE
+- [x] Issue #3: Add Dict/Any imports (5 min) - DONE
+- [ ] Issue #4: Fix response model (2 hrs)
+- [ ] Issue #5: Add document validation (15 min)
+- [ ] Issue #6: Fix circular imports (4-6 hrs)
+- [ ] Issue #7: Fix type mismatch (1-2 hrs)
+- [ ] Issue #8: Fix tempfile leaks (1 hr)
+- [ ] Issue #9: Fix bare except (5 min)
+- [ ] Issue #10: Fix ReDoS vulnerability (2-3 hrs)
+- [ ] Issue #11: Fix session leaks (1-2 hrs)
 
-**Total Week 1:** 8-12 hours
+**Total Week 1:** 12-18 hours
 
 ### Week 2: High-Priority Fixes
-- [ ] Issue #8: Add API endpoint tests (16-20 hrs)
-- [ ] Issue #9: Refactor profile resolution (2-3 hrs)
-- [ ] Issue #10: Add proper logging (3-4 hrs)
-- [ ] Issue #11: Add transaction rollback (4-6 hrs)
+- [ ] Issue #12: Add API endpoint tests (16-20 hrs)
+- [ ] Issue #13: Refactor profile resolution (2-3 hrs)
+- [ ] Issue #14: Add proper logging (3-4 hrs)
+- [ ] Issue #15: Add transaction rollback (4-6 hrs)
 
 **Total Week 2:** 25-33 hours
 
 ### Week 3: Remaining High-Priority + Testing
-- [ ] Issue #12: Fix session management (6-8 hrs)
-- [ ] Issue #13: Fix version race condition (2-3 hrs)
+- [ ] Issue #16: Fix session management (6-8 hrs)
+- [ ] Issue #17: Fix version race condition (2-3 hrs)
 - [ ] Test Suite #2: Concurrency tests (8-12 hrs)
 - [ ] Test Suite #3: Error tests (8-10 hrs)
 

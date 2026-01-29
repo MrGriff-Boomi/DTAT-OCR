@@ -33,10 +33,10 @@ import tempfile
 import platform
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 import json
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Query, Request, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Query, Request, Depends, Form, Body
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
