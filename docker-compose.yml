@@ -42,9 +42,9 @@ services:
     image: postgres:15-alpine
     container_name: ocr-postgres
     environment:
-      - POSTGRES_USER=ocr_demo
-      - POSTGRES_PASSWORD=ocr-demo-2026
-      - POSTGRES_DB=ocr_demo
+      - POSTGRES_USER=${POSTGRES_USER:-ocr_demo}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=${POSTGRES_DB:-ocr_demo}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
