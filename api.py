@@ -640,6 +640,7 @@ async def ocr_raw_binary(
     Usage: POST raw image bytes with Content-Type: image/png (or image/jpeg)
     """
     from fastapi.responses import PlainTextResponse, JSONResponse
+    from validators import validate_file
 
     content_type = request.headers.get("content-type", "image/png")
     contents = await request.body()
@@ -653,14 +654,49 @@ async def ocr_raw_binary(
             detail=f"File too large. Max size: {config.max_file_size_mb}MB"
         )
 
-    # Determine file type from content-type header
+    # Determine file type early for validation
     ext_map = {
         "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
         "image/tiff": "tiff", "image/bmp": "bmp", "image/gif": "gif",
         "application/pdf": "pdf", "application/octet-stream": "png",
     }
     file_type = ext_map.get(content_type.split(";")[0].strip().lower(), "png")
+
+    # Validate file before processing
+    validation_error = validate_file(contents, file_type)
+    if validation_error:
+        raise HTTPException(status_code=400, detail=validation_error.message)
+
     filename = f"boomi_upload.{file_type}"
+
+    # Dedup check — return cached result if same file was already processed
+    if config.enable_dedup:
+        from database import compute_content_hash, find_duplicate
+        content_hash = compute_content_hash(contents)
+        existing = find_duplicate(content_hash)
+        if existing:
+            doc = existing
+            def _extract_text(doc_record):
+                content = doc_record.get_extracted_content()
+                if isinstance(content, dict) and "blocks" in content:
+                    return "\n".join(b.get("text", "") for b in content["blocks"] if b.get("text"))
+                if isinstance(content, dict):
+                    return content.get("text", content.get("extracted_text", ""))
+                return str(content) if content else ""
+
+            if format == "text":
+                return PlainTextResponse(content=_extract_text(doc))
+            elif format == "json":
+                return JSONResponse(content={
+                    "id": doc.id, "status": "completed", "text": _extract_text(doc),
+                    "confidence": doc.confidence_score, "processing_time_ms": 0,
+                    "cached": True, "duplicate_of": doc.id,
+                })
+            else:
+                normalized_result = doc.get_normalized_content()
+                if normalized_result:
+                    formatter = get_formatter(format)
+                    return JSONResponse(content=formatter.format(normalized_result))
 
     record = create_document_record(
         filename=filename,
