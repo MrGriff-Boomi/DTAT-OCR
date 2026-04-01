@@ -276,9 +276,26 @@ async def ui_documents(request: Request, username: str = Depends(verify_credenti
 @app.get("/ui/settings", response_class=HTMLResponse)
 async def ui_settings(request: Request, username: str = Depends(verify_credentials)):
     """Settings page."""
+    def mask_value(val, show_chars=4):
+        if not val:
+            return ""
+        if len(val) <= show_chars:
+            return "*" * len(val)
+        return val[:show_chars] + "*" * (len(val) - show_chars)
+
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID", "")
+    aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    db_url = config.database_url
+
     return templates.TemplateResponse(request, "settings.html", context={
         "active_page": "settings",
-        "config": config
+        "config": config,
+        "aws_access_key_masked": mask_value(aws_key, 4) if aws_key else "",
+        "aws_secret_key_masked": mask_value(aws_secret, 4) if aws_secret else "",
+        "aws_region": config.aws_region,
+        "auth_username": API_USERNAME,
+        "auth_password_masked": "*" * len(API_PASSWORD) if API_PASSWORD else "",
+        "database_url_masked": mask_value(db_url, 15) if db_url else "",
     })
 
 
