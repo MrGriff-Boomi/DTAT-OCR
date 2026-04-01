@@ -143,6 +143,9 @@ class DocumentRecord(Base, Base64JSONMixin):
     table_count = Column(Integer)
     detected_language = Column(String(10))
 
+    # Content dedup
+    content_hash = Column(String(64), index=True)  # SHA-256 hash of uploaded file
+
     # Profile-based extraction (TASK-002)
     profile_id = Column(Integer, ForeignKey('extraction_profiles.id'), nullable=True, index=True)
     extracted_fields_json = Column(Text)  # Base64-encoded JSON of extracted fields
@@ -544,6 +547,24 @@ def seed_templates():
         db.close()
 
 
+def compute_content_hash(file_bytes: bytes) -> str:
+    """Compute SHA-256 hash of file content for dedup."""
+    import hashlib
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
+def find_duplicate(content_hash: str) -> Optional[DocumentRecord]:
+    """Find a completed document with matching content hash."""
+    session = get_session()
+    try:
+        return session.query(DocumentRecord).filter(
+            DocumentRecord.content_hash == content_hash,
+            DocumentRecord.status == ProcessingStatus.COMPLETED.value
+        ).first()
+    finally:
+        session.close()
+
+
 def create_document_record(
     filename: str,
     file_bytes: bytes,
@@ -556,6 +577,7 @@ def create_document_record(
         source_path=source_path,
         file_type=file_type,
         status=ProcessingStatus.PENDING.value,
+        content_hash=compute_content_hash(file_bytes),
     )
 
     if config.store_original_file:

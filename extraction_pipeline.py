@@ -486,13 +486,23 @@ class NativeExtractor:
                         if records:
                             all_tables.append(records)
 
+        # Mixed content detection: identify low-content (likely scanned) pages
+        low_content_pages = []
+        for i, text in enumerate(all_text):
+            if len(text.strip()) < config.blank_page_threshold:
+                low_content_pages.append(i)
+
         full_text = "\n\n".join(all_text)
 
         result = ExtractionResult(
             success=True,
             text_content=full_text,
             tables=all_tables,
-            metadata={"pages": page_count},
+            metadata={
+                "pages": page_count,
+                "low_content_pages": low_content_pages,
+                "mixed_content": len(low_content_pages) > 0 and len(low_content_pages) < page_count,
+            },
             confidence_score=0,  # Will be calculated later
             method_used=ExtractionMethod.NATIVE.value,
             processing_time_ms=int((time.time() - start_time) * 1000)
@@ -770,6 +780,46 @@ class TextractExtractor:
                 pass
 
     @classmethod
+    def _process_tiff_frames(cls, file_bytes: bytes, client) -> list:
+        """Split multi-frame TIFF into individual frames and process each."""
+        from PIL import Image
+        from io import BytesIO
+
+        img = Image.open(BytesIO(file_bytes))
+        all_blocks = []
+
+        frame_idx = 0
+        try:
+            while True:
+                img.seek(frame_idx)
+                # Convert frame to PNG for Textract
+                buf = BytesIO()
+                img.convert("RGB").save(buf, format="PNG")
+                frame_bytes = buf.getvalue()
+
+                if config.enable_handwriting:
+                    features = list(config.textract_features) + ['SIGNATURES']
+                    response = client.analyze_document(
+                        Document={'Bytes': frame_bytes},
+                        FeatureTypes=features
+                    )
+                else:
+                    response = client.detect_document_text(
+                        Document={'Bytes': frame_bytes}
+                    )
+
+                # Tag blocks with page number
+                for block in response.get('Blocks', []):
+                    block['Page'] = frame_idx + 1
+                all_blocks.extend(response.get('Blocks', []))
+
+                frame_idx += 1
+        except EOFError:
+            pass  # No more frames
+
+        return all_blocks
+
+    @classmethod
     def extract(cls, file_path: Path, file_type: str) -> ExtractionResult:
         start_time = time.time()
 
@@ -811,11 +861,21 @@ class TextractExtractor:
                     FeatureTypes=config.textract_features
                 )
                 all_blocks = response.get('Blocks', [])
+            elif file_type in ('tiff', 'tif'):
+                # Multi-frame TIFF: split frames and process each
+                all_blocks = cls._process_tiff_frames(file_bytes, client)
             else:
-                # Images: use detect_document_text (simpler, faster)
-                response = client.detect_document_text(
-                    Document={'Bytes': file_bytes}
-                )
+                # Images: use analyze_document with HANDWRITING if enabled, else detect_text
+                if config.enable_handwriting:
+                    features = list(config.textract_features) + ['SIGNATURES']
+                    response = client.analyze_document(
+                        Document={'Bytes': file_bytes},
+                        FeatureTypes=features
+                    )
+                else:
+                    response = client.detect_document_text(
+                        Document={'Bytes': file_bytes}
+                    )
                 all_blocks = response.get('Blocks', [])
 
             # Extract text from LINE blocks across all pages
@@ -910,6 +970,11 @@ class ExtractionPipeline:
                 levels_tried.append(f"native_attempt_{retry + 1}")
 
                 if result.success and result.confidence_score >= self.config.min_confidence_score:
+                    # Mixed content PDF: OCR the low-content pages with Textract
+                    if (result.metadata.get('mixed_content') and self.config.enable_textract
+                            and file_type == 'pdf'):
+                        result = self._enhance_mixed_content(result, file_path)
+                        levels_tried.append("textract_mixed_pages")
                     return self._finalize_success(document, result, levels_tried)
 
                 if retry < self.config.max_retries_per_level - 1:
@@ -988,6 +1053,50 @@ class ExtractionPipeline:
 
         return result
 
+    def _enhance_mixed_content(self, result: ExtractionResult, file_path: Path) -> ExtractionResult:
+        """For mixed-content PDFs, OCR the low-content pages with Textract."""
+        import pypdfium2 as pdfium
+
+        low_pages = result.metadata.get('low_content_pages', [])
+        if not low_pages:
+            return result
+
+        try:
+            pdf = pdfium.PdfDocument(file_path)
+            text_parts = result.text_content.split("\n\n")
+            ocr_pages = []
+
+            for page_idx in low_pages:
+                if page_idx < len(pdf):
+                    page = pdf[page_idx]
+                    pil_image = page.render(scale=2.0).to_pil()
+
+                    from io import BytesIO
+                    buf = BytesIO()
+                    pil_image.save(buf, format="PNG")
+                    img_bytes = buf.getvalue()
+
+                    client = TextractExtractor._get_client()
+                    response = client.detect_document_text(Document={'Bytes': img_bytes})
+
+                    page_text = "\n".join(
+                        b.get('Text', '') for b in response.get('Blocks', []) if b['BlockType'] == 'LINE'
+                    )
+
+                    if page_idx < len(text_parts):
+                        text_parts[page_idx] = page_text
+                    ocr_pages.append(page_idx)
+
+            result.text_content = "\n\n".join(text_parts)
+            result.metadata['ocr_enhanced_pages'] = ocr_pages
+            result.metadata['mixed_content_resolved'] = True
+            result.method_used = "native+textract"
+
+        except Exception as e:
+            result.metadata['mixed_content_error'] = str(e)
+
+        return result
+
     def _finalize_success(
         self,
         document: DocumentRecord,
@@ -995,13 +1104,20 @@ class ExtractionPipeline:
         levels_tried: list
     ) -> DocumentRecord:
         """Finalize a successful extraction."""
-        document.status = ProcessingStatus.COMPLETED.value
+        char_count = len(result.text_content)
+
+        # Blank page detection
+        if char_count < config.blank_page_threshold and result.confidence_score >= 50:
+            document.status = "blank_page"
+        else:
+            document.status = ProcessingStatus.COMPLETED.value
+
         document.completed_at = datetime.utcnow()
         document.extraction_method = result.method_used
         document.extraction_levels_tried = str(levels_tried)
         document.confidence_score = result.confidence_score
         document.processing_time_ms = result.processing_time_ms
-        document.char_count = len(result.text_content)
+        document.char_count = char_count
         document.table_count = len(result.tables)
         document.page_count = result.metadata.get('pages', 1)
 

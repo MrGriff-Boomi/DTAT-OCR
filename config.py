@@ -47,6 +47,12 @@ class ProcessingConfig:
     store_original_file: bool = True         # Store original doc as base64 too
     max_file_size_mb: int = 50               # Reject files larger than this
 
+    # Edge case handling
+    enable_dedup: bool = True                # Skip re-processing identical documents
+    enable_handwriting: bool = True          # Add HANDWRITING to Textract FeatureTypes for images
+    blank_page_threshold: int = 10           # Pages with fewer chars flagged as blank
+    default_language: str = field(default_factory=lambda: os.getenv("OCR_LANGUAGE", "en"))  # Language hint
+
     # Processing settings
     batch_size: int = 10                     # Process N docs before committing
     worker_timeout_seconds: int = 300        # 5 min max per document
