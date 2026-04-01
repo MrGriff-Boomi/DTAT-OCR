@@ -72,22 +72,37 @@
 
 ## Validation Criteria
 
-| Metric | Before | Target | How to Measure |
-|--------|--------|--------|----------------|
-| Concurrent requests | 1 | 8-12 | `ab -n 20 -c 8` (Apache Bench) |
-| Docs/minute | ~25 | 100-150 | Load test with sample images |
-| Burst handling | Timeout at 2+ | 50 doc burst | Rapid-fire curl script |
-| DB write contention | Locks on 2+ writes | None | Concurrent insert test |
-| Avg response time | 2-3s | 1.5-2s | `/stats` endpoint |
+| Metric | Before | Target | Actual (Measured) |
+|--------|--------|--------|-------------------|
+| Concurrent requests | 1 | 8-12 | **50 concurrent (0 failures)** |
+| Docs/minute (direct) | ~25 | 100-150 | **250 docs/min (4.1 docs/sec)** |
+| Docs/minute (Boomi WSS) | ~25 | 40-60 | **41 docs/min (0.68 docs/sec)** |
+| Burst handling | Timeout at 2+ | 50 doc burst | **50 docs in 12s direct, 73s via Boomi** |
+| DB write contention | Locks on 2+ writes | None | **0 contention (PostgreSQL)** |
+| Avg processing time | 2-3s | 1.5-2s | **2.4s avg, 3.5s p95** |
+| Estimated daily (8hr, Boomi) | ~12,000 | 20,000+ | **~20,000 docs/day** |
+| Estimated daily (8hr, direct) | ~12,000 | 50,000+ | **~120,000 docs/day** |
+
+### Load Test Results (2026-04-01)
+
+**50-doc burst test (direct to DTAT):**
+- 50 jobs submitted in 7s, all completed in 12s total
+- 0 failures, avg 2.4s, p95 3.5s
+
+**50-doc burst test (through Boomi WSS):**
+- 5 batches of 10 concurrent requests
+- All 50 returned HTTP 200 with 390 chars extracted text
+- Per-batch time: 13-16s (Boomi WSS processes synchronously)
+- Total: 73s, 0 failures
 
 ---
 
 ## Out of Scope (Future AWS Work)
 
-- ECS/Fargate auto-scaling
-- SQS job queuing
-- RDS managed PostgreSQL
-- S3 document storage
+- ECS/Fargate auto-scaling (for 1000+ docs/min)
+- SQS job queuing (for guaranteed delivery)
+- RDS managed PostgreSQL (for HA/backups)
+- S3 document storage (for large files)
 - CloudWatch logging
 - Multi-AZ availability
 

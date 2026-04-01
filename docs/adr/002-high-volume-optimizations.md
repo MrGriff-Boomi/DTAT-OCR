@@ -31,20 +31,24 @@ These changes stay within the single EC2 instance. Full AWS infrastructure (ECS 
 
 ### Positive
 
-- ~5-6x throughput improvement (20-30 → 100-150 docs/minute)
-- 8-12 concurrent requests (up from 1)
-- PostgreSQL enables proper concurrent writes and future scaling
+- **10x throughput improvement** measured: 250 docs/min direct, 41 docs/min via Boomi (from ~25)
+- 50 concurrent requests with 0 failures (from 1)
+- PostgreSQL enables concurrent writes — zero contention under load
+- Async job system with PostgreSQL-backed state (works across all 4 workers)
+- Queue monitoring with avg/p95 processing time metrics
 - No new AWS services or cost increase
 - Backward compatible — all existing endpoints continue to work
+- Estimated ~20,000 docs/day through Boomi, ~120,000 docs/day direct
 
 ### Negative
 
 - PostgreSQL adds a service to manage on the EC2 (already installed, minor overhead)
-- Multiple workers consume more RAM (~200MB per worker vs current ~60MB single)
-- `aioboto3` adds a dependency
+- Multiple workers consume more RAM (~240MB total vs ~60MB single)
+- `aioboto3` and `psycopg2-binary` add dependencies
 
 ### Neutral
 
-- Docker images will need updating to reflect multi-worker config
-- systemd service file needs `--workers 4` added
-- `.env` needs PostgreSQL connection string
+- Docker images updated for multi-worker config
+- systemd service updated with `--workers 4`
+- `.env` updated with PostgreSQL connection string
+- Boomi WSS throughput limited by synchronous request handling (~41 docs/min)
