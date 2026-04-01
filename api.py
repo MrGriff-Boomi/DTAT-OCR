@@ -238,8 +238,7 @@ class SettingsUpdate(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def ui_home(request: Request, username: str = Depends(verify_credentials)):
     """Main processing page."""
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", context={
         "active_page": "home"
     })
 
@@ -247,8 +246,7 @@ async def ui_home(request: Request, username: str = Depends(verify_credentials))
 @app.get("/ui/documents", response_class=HTMLResponse)
 async def ui_documents(request: Request, username: str = Depends(verify_credentials)):
     """Documents list page."""
-    return templates.TemplateResponse("documents.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "documents.html", context={
         "active_page": "documents"
     })
 
@@ -256,8 +254,7 @@ async def ui_documents(request: Request, username: str = Depends(verify_credenti
 @app.get("/ui/settings", response_class=HTMLResponse)
 async def ui_settings(request: Request, username: str = Depends(verify_credentials)):
     """Settings page."""
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "settings.html", context={
         "active_page": "settings",
         "config": config
     })
@@ -426,7 +423,7 @@ async def documents_table(status: Optional[str] = None, username: str = Depends(
                     </span>
                 </td>
                 <td class="px-4 py-3 text-sm text-gray-500">{safe_method}</td>
-                <td class="px-4 py-3 text-sm text-gray-500">{r.confidence_score:.0f}% if r.confidence_score else 'N/A'</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{f'{r.confidence_score:.0f}%' if r.confidence_score else 'N/A'}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">{r.processing_time_ms // 1000 if r.processing_time_ms else 0}s</td>
                 <td class="px-4 py-3 text-sm text-gray-500">{r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else 'N/A'}</td>
                 <td class="px-4 py-3 text-sm">
@@ -589,6 +586,98 @@ async def process_document_sync(
         response.extracted_content_b64 = result.extracted_content_b64
 
     return response
+
+
+@app.post("/ocr")
+async def ocr_raw_binary(
+    request: Request,
+    format: str = Query("text", description="Output format: text, json, textract, google, azure"),
+    username: str = Depends(verify_credentials)
+):
+    """
+    Simple OCR endpoint that accepts raw image binary in the request body.
+    Returns extracted text directly. Designed for Boomi HTTP Client passthrough.
+
+    Usage: POST raw image bytes with Content-Type: image/png (or image/jpeg)
+    """
+    from fastapi.responses import PlainTextResponse, JSONResponse
+
+    content_type = request.headers.get("content-type", "image/png")
+    contents = await request.body()
+
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty request body")
+
+    if len(contents) > config.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size: {config.max_file_size_mb}MB"
+        )
+
+    # Determine file type from content-type header
+    ext_map = {
+        "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+        "image/tiff": "tiff", "image/bmp": "bmp", "image/gif": "gif",
+        "application/pdf": "pdf", "application/octet-stream": "png",
+    }
+    file_type = ext_map.get(content_type.split(";")[0].strip().lower(), "png")
+    filename = f"boomi_upload.{file_type}"
+
+    record = create_document_record(
+        filename=filename,
+        file_bytes=contents,
+        file_type=file_type,
+    )
+    doc_id = save_document(record)
+    record.id = doc_id
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type}") as tmp:
+        tmp.write(contents)
+        tmp_path = Path(tmp.name)
+
+    try:
+        pipeline = ExtractionPipeline()
+        result = pipeline.process(record, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    # Get the text from the processed record
+    doc = get_document(result.id)
+    if not doc:
+        raise HTTPException(status_code=500, detail="Processing failed")
+
+    if result.status != "completed":
+        raise HTTPException(status_code=422, detail=f"OCR failed: {result.error_message}")
+
+    # Extract text from normalized block storage
+    def _extract_text_from_doc(doc_record):
+        content = doc_record.get_extracted_content()
+        if isinstance(content, dict):
+            # Normalized format: extract text from blocks
+            if "blocks" in content:
+                lines = [b.get("text", "") for b in content["blocks"] if b.get("text")]
+                return "\n".join(lines)
+            return content.get("text", content.get("extracted_text", str(content)))
+        return str(content) if content else ""
+
+    # Return based on requested format
+    if format == "text":
+        return PlainTextResponse(content=_extract_text_from_doc(doc))
+    elif format == "json":
+        return JSONResponse(content={
+            "id": result.id,
+            "status": result.status,
+            "text": _extract_text_from_doc(doc),
+            "confidence": result.confidence_score,
+            "processing_time_ms": result.processing_time_ms,
+        })
+    else:
+        # Use the formatters for textract/google/azure
+        normalized_result = doc.get_normalized_content()
+        if normalized_result:
+            formatter = get_formatter(format)
+            return JSONResponse(content=formatter.format(normalized_result))
+        raise HTTPException(status_code=500, detail="No normalized content available")
 
 
 @app.post("/process/async", response_model=ProcessingResponse)

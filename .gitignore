@@ -33,6 +33,7 @@ data/
 *.tmp
 *.temp
 temp/
+nul
 
 # Logs
 *.log
@@ -52,5 +53,11 @@ Thumbs.db
 # Test outputs
 *.output
 
-# Samples (optional - can be regenerated)
-# samples/
+# Sample images (download via download_samples.py)
+samples/
+
+# AI agent config (not for public repos)
+CLAUDE.md
+
+# Deployment logs (contain infrastructure details)
+DEPLOYMENT-LOG.md

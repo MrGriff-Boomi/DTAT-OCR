@@ -13,8 +13,8 @@ class ProcessingConfig:
 
     # Extraction levels (enable/disable)
     enable_native_extraction: bool = True    # Level 1: Free parsing
-    enable_local_ocr: bool = True            # Level 2: LightOnOCR
-    enable_textract: bool = False            # Level 3: AWS Textract (paid)
+    enable_local_ocr: bool = False           # Level 2: LightOnOCR (disabled - too slow on CPU)
+    enable_textract: bool = True             # Level 3: AWS Textract (~1-3s per page)
 
     # Retry settings
     max_retries_per_level: int = 2

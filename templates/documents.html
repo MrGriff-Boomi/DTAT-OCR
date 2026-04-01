@@ -85,15 +85,23 @@ async function viewDocument(id) {
     modal.classList.remove('hidden');
 
     try {
-        const response = await fetch(`/documents/${id}/content`);
-        const data = await response.json();
+        const [metaResp, contentResp] = await Promise.all([
+            fetch(`/documents/${id}`, { credentials: 'include' }),
+            fetch(`/documents/${id}/content?format=dtat`, { credentials: 'include' })
+        ]);
+        const meta = await metaResp.json();
+        const data = contentResp.ok ? await contentResp.json() : {};
 
-        if (response.ok) {
+        if (metaResp.ok) {
             content.innerHTML = `
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4 text-sm">
-                        <div><span class="text-gray-500">Filename:</span> <span class="font-medium">${escapeHtml(data.source_filename)}</span></div>
-                        <div><span class="text-gray-500">Status:</span> <span class="font-medium">${escapeHtml(data.status)}</span></div>
+                        <div><span class="text-gray-500">Filename:</span> <span class="font-medium">${escapeHtml(meta.source_filename || 'N/A')}</span></div>
+                        <div><span class="text-gray-500">Status:</span> <span class="font-medium">${escapeHtml(meta.status || 'N/A')}</span></div>
+                        <div><span class="text-gray-500">Method:</span> <span class="font-medium">${escapeHtml(meta.extraction_method || 'N/A')}</span></div>
+                        <div><span class="text-gray-500">Confidence:</span> <span class="font-medium">${meta.confidence_score ? meta.confidence_score + '%' : 'N/A'}</span></div>
+                        <div><span class="text-gray-500">Processing Time:</span> <span class="font-medium">${meta.processing_time_ms ? (meta.processing_time_ms / 1000).toFixed(1) + 's' : 'N/A'}</span></div>
+                        <div><span class="text-gray-500">Characters:</span> <span class="font-medium">${meta.char_count || 'N/A'}</span></div>
                     </div>
 
                     ${data.extracted_text ? `
@@ -112,7 +120,7 @@ async function viewDocument(id) {
                 </div>
             `;
         } else {
-            content.innerHTML = `<p class="text-red-600">Error loading document: ${data.detail || 'Unknown error'}</p>`;
+            content.innerHTML = `<p class="text-red-600">Error loading document: ${meta.detail || 'Unknown error'}</p>`;
         }
     } catch (error) {
         content.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
@@ -123,7 +131,7 @@ async function retryDocument(id) {
     if (!confirm('Retry processing this document?')) return;
 
     try {
-        const response = await fetch(`/documents/${id}/retry`, { method: 'POST' });
+        const response = await fetch(`/documents/${id}/retry`, { method: 'POST', credentials: 'include' });
         if (response.ok) {
             refreshDocuments();
         } else {
