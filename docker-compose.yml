@@ -24,12 +24,12 @@ services:
     environment:
       - DATABASE_URL=sqlite:////app/data/documents.db
       - OCR_OFFLINE_MODE=true
-      - ENABLE_TEXTRACT=false
-      # Uncomment for Textract support:
-      # - ENABLE_TEXTRACT=true
-      # - AWS_REGION=us-east-1
-      # - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - ENABLE_TEXTRACT=true
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - DTAT_USERNAME=${DTAT_USERNAME:-admin}
+      - DTAT_PASSWORD=${DTAT_PASSWORD:-changeme123}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -38,18 +38,23 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # Optional: PostgreSQL for production
-  # postgres:
-  #   image: postgres:15-alpine
-  #   container_name: ocr-postgres
-  #   environment:
-  #     - POSTGRES_USER=ocr
-  #     - POSTGRES_PASSWORD=ocr_password
-  #     - POSTGRES_DB=documents
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
+  postgres:
+    image: postgres:15-alpine
+    container_name: ocr-postgres
+    environment:
+      - POSTGRES_USER=ocr_demo
+      - POSTGRES_PASSWORD=ocr-demo-2026
+      - POSTGRES_DB=ocr_demo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocr_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
-# volumes:
-#   postgres_data:
+volumes:
+  postgres_data:

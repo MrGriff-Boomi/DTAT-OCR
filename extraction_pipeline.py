@@ -680,8 +680,18 @@ class LocalOCRExtractor:
 class TextractExtractor:
     """Level 3: AWS Textract (paid, optional)."""
 
-    @staticmethod
-    def extract(file_path: Path, file_type: str) -> ExtractionResult:
+    _client = None
+
+    @classmethod
+    def _get_client(cls):
+        """Reuse boto3 Textract client across requests (avoids per-request init overhead)."""
+        if cls._client is None:
+            import boto3
+            cls._client = boto3.client('textract', region_name=config.aws_region)
+        return cls._client
+
+    @classmethod
+    def extract(cls, file_path: Path, file_type: str) -> ExtractionResult:
         start_time = time.time()
 
         if not config.enable_textract:
@@ -697,9 +707,7 @@ class TextractExtractor:
             )
 
         try:
-            import boto3
-
-            client = boto3.client('textract', region_name=config.aws_region)
+            client = cls._get_client()
 
             with open(file_path, 'rb') as f:
                 file_bytes = f.read()

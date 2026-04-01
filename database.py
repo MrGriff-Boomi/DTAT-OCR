@@ -455,10 +455,25 @@ def get_engine():
     """Get or create database engine."""
     global _engine
     if _engine is None:
+        connect_args = {}
+        pool_kwargs = {"pool_pre_ping": True}
+
+        if config.database_url.startswith("sqlite"):
+            # SQLite: allow multi-thread access (needed for multi-worker uvicorn)
+            connect_args["check_same_thread"] = False
+        else:
+            # PostgreSQL/other: configure connection pool for concurrent workers
+            pool_kwargs.update({
+                "pool_size": 8,
+                "max_overflow": 4,
+                "pool_recycle": 1800,
+            })
+
         _engine = create_engine(
             config.database_url,
-            echo=False,  # Set True for SQL debugging
-            pool_pre_ping=True
+            echo=False,
+            connect_args=connect_args,
+            **pool_kwargs
         )
     return _engine
 
