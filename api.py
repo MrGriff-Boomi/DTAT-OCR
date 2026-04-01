@@ -118,10 +118,12 @@ app = FastAPI(
 
     **Features:**
     - Multi-format OCR output (Textract, Google Vision, Azure OCR, DTAT native)
-    - Local GPU/CPU processing (save $1.50/1000 pages vs Textract)
+    - AWS Textract integration (~1-3s per page, 90%+ confidence)
     - Intelligent extraction ladder with retry logic
     - Quality scoring and automatic escalation
     - Support for PDF, Excel, CSV, Word, images
+    - Multi-page PDF support via async Textract API
+    - Boomi integration via /ocr raw binary endpoint
 
     **Output Formats:**
     - `textract` - AWS Textract-compatible (default)
@@ -129,16 +131,36 @@ app = FastAPI(
     - `azure` - Azure Computer Vision-compatible
     - `dtat` - DTAT native format
     """,
-    version="2.0.0",
+    version="2.1.0",
     contact={
         "name": "DTAT OCR",
-        "url": "https://github.com/NotADevIAmaMeatPopsicle/DTAT-OCR"
+        "url": "https://github.com/MrGriff-Boomi/DTAT-OCR"
     },
     license_info={
         "name": "MIT",
         "url": "https://opensource.org/licenses/MIT"
-    }
+    },
+    swagger_ui_parameters={
+        "defaultModelsExpandDepth": -1,
+    },
+    docs_url=None,
 )
+
+
+from fastapi.openapi.docs import get_swagger_ui_html
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui():
+    """Serve Swagger UI with a version that supports OpenAPI 3.1."""
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="DTAT OCR - API Docs",
+        swagger_ui_parameters={"defaultModelsExpandDepth": -1},
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+    )
+
 
 # Templates
 templates = Jinja2Templates(directory="templates")

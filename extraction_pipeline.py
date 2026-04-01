@@ -712,31 +712,57 @@ class TextractExtractor:
             with open(file_path, 'rb') as f:
                 file_bytes = f.read()
 
-            # Use async for multi-page PDFs, sync for images
-            if file_type == 'pdf':
-                # For production, you'd use start_document_analysis + get_document_analysis
-                # For simplicity, using sync analyze_document (single page only)
+            all_blocks = []
+
+            if file_type == 'pdf' and len(file_bytes) > 5 * 1024 * 1024:
+                # Large PDFs (>5MB): must use S3-based async API
+                # For now, fall through to error — would need S3 upload
+                return ExtractionResult(
+                    success=False, text_content="", tables=[], metadata={},
+                    confidence_score=0, method_used=ExtractionMethod.TEXTRACT.value,
+                    error_message="PDF too large for direct Textract (>5MB). S3-based processing not yet implemented.",
+                    processing_time_ms=int((time.time() - start_time) * 1000)
+                )
+            elif file_type == 'pdf':
+                # PDFs: use analyze_document with TABLES+FORMS for richer extraction
+                # Textract sync API handles multi-page PDFs up to 5MB
                 response = client.analyze_document(
                     Document={'Bytes': file_bytes},
                     FeatureTypes=config.textract_features
                 )
+                all_blocks = response.get('Blocks', [])
             else:
+                # Images: use detect_document_text (simpler, faster)
                 response = client.detect_document_text(
                     Document={'Bytes': file_bytes}
                 )
+                all_blocks = response.get('Blocks', [])
 
-            # Extract text from response
+            # Extract text from LINE blocks across all pages
             all_text = []
-            for block in response.get('Blocks', []):
+            page_count = 0
+            for block in all_blocks:
                 if block['BlockType'] == 'LINE':
                     all_text.append(block.get('Text', ''))
+                if block['BlockType'] == 'PAGE':
+                    page_count += 1
+
+            # Extract tables if present
+            tables = []
+            table_blocks = [b for b in all_blocks if b['BlockType'] == 'TABLE']
+            if table_blocks:
+                tables = [{"table_id": b.get('Id', ''), "cells": len(b.get('Relationships', []))} for b in table_blocks]
 
             result = ExtractionResult(
                 success=True,
                 text_content="\n".join(all_text),
-                tables=[],  # Could parse TABLES from response
-                metadata={"textract_blocks": len(response.get('Blocks', []))},
-                confidence_score=90,  # Textract is generally reliable
+                tables=tables,
+                metadata={
+                    "textract_blocks": len(all_blocks),
+                    "pages": page_count or 1,
+                    "tables_found": len(tables),
+                },
+                confidence_score=90,
                 method_used=ExtractionMethod.TEXTRACT.value,
                 processing_time_ms=int((time.time() - start_time) * 1000)
             )
