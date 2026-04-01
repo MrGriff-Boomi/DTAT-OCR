@@ -15,7 +15,7 @@ Enterprise document processor with AWS Textract integration. Handles PDFs (multi
 - **Multi-format input**: PDF, XLSX, CSV, DOCX, JPG, PNG, TIFF, and more
 - **Intelligent extraction ladder**: Native parsing first, Textract for images/scanned docs
 - **High-volume ready**: 4 concurrent workers, PostgreSQL storage, async job queue
-- **Integration-ready: `/ocr` endpoint for direct binary passthrough from any platform
+- **Boomi integration**: `/ocr` endpoint for direct binary passthrough (3-shape WSS process)
 - **Async processing**: Fire-and-forget `/ocr/async` with PostgreSQL-backed job tracking
 - **Web UI**: Drag-and-drop processing, document viewer, and settings
 - **REST API**: 15+ endpoints with Swagger documentation
@@ -53,12 +53,12 @@ Document In
 └─────────────────────────────────────┘
 ```
 
-### Integration Integration
+### Boomi Integration
 
-DTAT-OCR includes a `/ocr` endpoint designed for Integration passthrough — accepts raw image binary via POST and returns extracted text directly. This enables a simple 3-shape Integration process (HTTP Listener → REST Connector → Return Documents) with no scripting required.
+DTAT-OCR includes a `/ocr` endpoint designed for Boomi passthrough — accepts raw image binary via POST and returns extracted text directly. This enables a simple 3-shape Boomi process (WSS Listener → REST Connector → Return Documents) with no scripting required.
 
 ```
-Browser → Integration Platform → HTTP POST → DTAT-OCR /ocr → AWS Textract → Response
+Browser → Boomi WSS → REST Connector → DTAT-OCR /ocr → AWS Textract → Response
 ```
 
 ### Performance (Single EC2 t3.medium)
@@ -66,7 +66,7 @@ Browser → Integration Platform → HTTP POST → DTAT-OCR /ocr → AWS Textrac
 | Path | Throughput | Estimated Daily (8hr) |
 |------|------------|----------------------|
 | Direct to DTAT | 250 docs/min | ~120,000 docs |
-| Through integration platform | 41 docs/min | ~20,000 docs |
+| Through Boomi WSS | 41 docs/min | ~20,000 docs |
 
 50-document burst test: 0 failures, avg 2.4s/doc, P95 3.5s/doc.
 
@@ -75,7 +75,7 @@ Browser → Integration Platform → HTTP POST → DTAT-OCR /ocr → AWS Textrac
 ### Installation
 
 ```bash
-git clone https://github.com/NotADevIAmaMeatPopsicle/DTAT-OCR.git
+git clone https://github.com/MrGriff-Boomi/DTAT-OCR.git
 cd DTAT-OCR
 
 python -m venv .venv
@@ -138,7 +138,7 @@ DTAT_PASSWORD=your-secure-password
 # Health check
 curl http://localhost:8000/health
 
-# OCR an image (raw binary — for integration passthrough)
+# OCR an image (raw binary — for Boomi passthrough)
 curl -X POST -u admin:password -H "Content-Type: image/png" \
   --data-binary @receipt.png "http://localhost:8000/ocr?format=text"
 
@@ -243,7 +243,7 @@ DTAT-OCR/
 - Textract rate limit retry (adaptive backoff, 5 max attempts)
 - Multi-format output (Textract, Google Vision, Azure OCR)
 - High-volume: 4 workers, PostgreSQL, async job queue
-- Integration passthrough via `/ocr` binary endpoint
+- Boomi integration via `/ocr` binary passthrough
 - Load tested: 50-doc burst, 0 failures, 250 docs/min direct
 - Web UI with settings page (AWS credentials, auth, database config)
 - Swagger API docs, profile-based extraction
@@ -255,7 +255,7 @@ DTAT-OCR/
 - Handwriting detection mode
 - SQS integration for guaranteed message delivery
 - ECS Fargate with auto-scaling
-- Message queue decoupling for higher throughput
+- Boomi Event Streams decoupling for higher WSS throughput
 
 ## Architecture Decision Records
 
@@ -263,7 +263,7 @@ DTAT-OCR/
 |-----|----------|
 | [001](docs/adr/001-replace-pymupdf-with-pdfplumber.md) | Replace PyMuPDF with pdfplumber (licensing) |
 | [002](docs/adr/002-high-volume-optimizations.md) | Multi-worker + PostgreSQL + session reuse (10x throughput) |
-| [003](docs/adr/003-multi-page-pdf-and-execution-modes.md) | Sync Textract for multi-page PDFs, execution mode optimization |
+| [003](docs/adr/003-multi-page-pdf-and-execution-modes.md) | Sync Textract for multi-page PDFs, Bridge mode for Boomi |
 
 ## License
 
