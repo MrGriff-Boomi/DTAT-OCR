@@ -445,6 +445,23 @@ class NativeExtractor:
     def _extract_pdf(file_path: Path, start_time: float) -> ExtractionResult:
         import pdfplumber
 
+        # Check for password-protected/encrypted PDFs before processing
+        try:
+            with pdfplumber.open(file_path) as test_pdf:
+                # Must actually access a page — some encrypted PDFs open but fail on page access
+                if len(test_pdf.pages) > 0:
+                    test_pdf.pages[0].extract_text()
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(kw in err_str for kw in ['encrypt', 'password', 'protected', 'permission', 'crypt']):
+                return ExtractionResult(
+                    success=False, text_content="", tables=[], metadata={"is_encrypted": True},
+                    confidence_score=0, method_used=ExtractionMethod.NATIVE.value,
+                    error_message="PDF is password-protected. Please provide an unencrypted version.",
+                    processing_time_ms=int((time.time() - start_time) * 1000)
+                )
+            raise
+
         all_text = []
         all_tables = []
 
@@ -684,11 +701,73 @@ class TextractExtractor:
 
     @classmethod
     def _get_client(cls):
-        """Reuse boto3 Textract client across requests (avoids per-request init overhead)."""
+        """Reuse boto3 Textract client across requests with adaptive retry."""
         if cls._client is None:
             import boto3
-            cls._client = boto3.client('textract', region_name=config.aws_region)
+            from botocore.config import Config
+            retry_config = Config(
+                retries={'max_attempts': 5, 'mode': 'adaptive'},
+                read_timeout=60,
+                connect_timeout=10,
+            )
+            cls._client = boto3.client('textract', region_name=config.aws_region, config=retry_config)
         return cls._client
+
+    _s3_client = None
+
+    @classmethod
+    def _get_s3_client(cls):
+        """Reuse boto3 S3 client."""
+        if cls._s3_client is None:
+            import boto3
+            cls._s3_client = boto3.client('s3', region_name=config.aws_region)
+        return cls._s3_client
+
+    @classmethod
+    def _process_via_s3(cls, file_path: Path, file_bytes: bytes) -> list:
+        """Upload to S3, run async Textract, poll for results, cleanup."""
+        import uuid as _uuid
+
+        s3 = cls._get_s3_client()
+        client = cls._get_client()
+
+        s3_key = f"{config.s3_prefix}{_uuid.uuid4()}.pdf"
+
+        try:
+            # Upload to S3
+            s3.put_object(Bucket=config.s3_bucket, Key=s3_key, Body=file_bytes)
+
+            # Start async text detection
+            response = client.start_document_text_detection(
+                DocumentLocation={'S3Object': {'Bucket': config.s3_bucket, 'Name': s3_key}}
+            )
+            job_id = response['JobId']
+
+            # Poll until complete (max 5 minutes, 5s intervals)
+            for _ in range(60):
+                result = client.get_document_text_detection(JobId=job_id)
+                status = result['JobStatus']
+                if status == 'SUCCEEDED':
+                    all_blocks = result.get('Blocks', [])
+                    # Handle pagination for large documents
+                    next_token = result.get('NextToken')
+                    while next_token:
+                        result = client.get_document_text_detection(JobId=job_id, NextToken=next_token)
+                        all_blocks.extend(result.get('Blocks', []))
+                        next_token = result.get('NextToken')
+                    return all_blocks
+                elif status == 'FAILED':
+                    raise Exception(f"Textract async job failed: {result.get('StatusMessage', 'Unknown error')}")
+                time.sleep(5)
+
+            raise Exception("Textract async job timed out after 5 minutes")
+
+        finally:
+            # Cleanup S3 temp file
+            try:
+                s3.delete_object(Bucket=config.s3_bucket, Key=s3_key)
+            except Exception:
+                pass
 
     @classmethod
     def extract(cls, file_path: Path, file_type: str) -> ExtractionResult:
@@ -715,14 +794,15 @@ class TextractExtractor:
             all_blocks = []
 
             if file_type == 'pdf' and len(file_bytes) > 5 * 1024 * 1024:
-                # Large PDFs (>5MB): must use S3-based async API
-                # For now, fall through to error — would need S3 upload
-                return ExtractionResult(
-                    success=False, text_content="", tables=[], metadata={},
-                    confidence_score=0, method_used=ExtractionMethod.TEXTRACT.value,
-                    error_message="PDF too large for direct Textract (>5MB). S3-based processing not yet implemented.",
-                    processing_time_ms=int((time.time() - start_time) * 1000)
-                )
+                # Large PDFs (>5MB): use S3 upload + async Textract API
+                if not config.s3_bucket:
+                    return ExtractionResult(
+                        success=False, text_content="", tables=[], metadata={},
+                        confidence_score=0, method_used=ExtractionMethod.TEXTRACT.value,
+                        error_message="PDF too large for direct Textract (>5MB). Set S3_BUCKET env var to enable large file processing.",
+                        processing_time_ms=int((time.time() - start_time) * 1000)
+                    )
+                all_blocks = cls._process_via_s3(file_path, file_bytes)
             elif file_type == 'pdf':
                 # PDFs: use analyze_document with TABLES+FORMS for richer extraction
                 # Textract sync API handles multi-page PDFs up to 5MB
@@ -770,6 +850,17 @@ class TextractExtractor:
             return result
 
         except Exception as e:
+            err_msg = str(e).lower()
+            # Detect encrypted/unsupported PDFs at Textract level
+            if 'unsupporteddocument' in err_msg or 'encrypt' in err_msg:
+                if file_type == 'pdf':
+                    return ExtractionResult(
+                        success=False, text_content="", tables=[],
+                        metadata={"is_encrypted": True},
+                        confidence_score=0, method_used=ExtractionMethod.TEXTRACT.value,
+                        error_message="PDF is password-protected or has unsupported encryption. Please provide an unencrypted version.",
+                        processing_time_ms=int((time.time() - start_time) * 1000)
+                    )
             return ExtractionResult(
                 success=False,
                 text_content="",

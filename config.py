@@ -31,9 +31,11 @@ class ProcessingConfig:
     ocr_image_max_dim: int = 1540
     ocr_offline_mode: bool = True  # Don't call HF Hub if model is cached
 
-    # AWS settings (for Textract fallback)
+    # AWS settings (for Textract)
     aws_region: str = field(default_factory=lambda: os.getenv("AWS_REGION", "us-east-1"))
     textract_features: list = field(default_factory=lambda: ["TABLES", "FORMS"])
+    s3_bucket: str = field(default_factory=lambda: os.getenv("S3_BUCKET", ""))
+    s3_prefix: str = field(default_factory=lambda: os.getenv("S3_PREFIX", "dtat-ocr/temp/"))
 
     # Database settings
     database_url: str = field(default_factory=lambda: os.getenv(
