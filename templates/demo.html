@@ -733,6 +733,27 @@
         </button>
     </div>
 
+    <div class="engine-picker" style="margin-top:1rem;">
+        <div style="font-size:0.75rem; color:var(--slate-500); margin-bottom:0.4rem; font-weight:500;">OCR Engine &amp; Path</div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+            <label class="engine-opt"><input type="radio" name="engine" value="boomi_textract" checked> AWS Textract via Boomi WSS</label>
+            <label class="engine-opt"><input type="radio" name="engine" value="boomi_azure"> Azure DI via Boomi WSS</label>
+            <label class="engine-opt"><input type="radio" name="engine" value="dtat_textract"> AWS Textract (direct to DTAT)</label>
+            <label class="engine-opt"><input type="radio" name="engine" value="dtat_azure"> Azure DI (direct to DTAT)</label>
+        </div>
+        <style>
+            .engine-opt {
+                display:inline-flex; align-items:center; gap:0.4rem;
+                padding:0.4rem 0.75rem; border:1px solid var(--slate-200); border-radius:6px;
+                font-size:0.8rem; cursor:pointer; background:white;
+                transition: all 0.15s;
+            }
+            .engine-opt:hover { border-color: var(--coral); }
+            .engine-opt input { margin:0; }
+            .engine-opt:has(input:checked) { border-color: var(--coral); background: rgba(255,124,102,0.06); font-weight:500; }
+        </style>
+    </div>
+
     <div class="results-panel" id="resultsPanel">
         <div class="results-header">
             <div class="result-metric">
@@ -846,19 +867,45 @@
     /* ── Run OCR ── */
     let testCount = 0;
 
+    const ENGINE_ROUTES = {
+        boomi_textract: {
+            url: '/ws/simple/executeOcr',
+            auth: 'AgenticProcessBuilder@boomi_michaelgriffin-I59GZ7.HAD03L:c91fb69b-86d6-40ca-a03d-40f3f63fc68d',
+            label: 'AWS Textract via Boomi WSS',
+        },
+        boomi_azure: {
+            url: '/ws/simple/executeAzureOcr',
+            auth: 'AgenticProcessBuilder@boomi_michaelgriffin-I59GZ7.HAD03L:c91fb69b-86d6-40ca-a03d-40f3f63fc68d',
+            label: 'Azure DI via Boomi WSS',
+        },
+        dtat_textract: {
+            url: '/ocr/ocr?format=text&engine=textract',
+            auth: 'dtat:ocr-grifftest1-2026',
+            label: 'AWS Textract (DTAT direct)',
+        },
+        dtat_azure: {
+            url: '/ocr/ocr?format=text&engine=azure_di',
+            auth: 'dtat:ocr-grifftest1-2026',
+            label: 'Azure DI (DTAT direct)',
+        },
+    };
+
     async function runOCR() {
         if (!selectedFile) return;
+        const choice = (document.querySelector('input[name="engine"]:checked') || {}).value || 'boomi_textract';
+        const route = ENGINE_ROUTES[choice];
         const btn = document.getElementById('runBtn');
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Processing...';
+        btn.innerHTML = '<span class="spinner"></span> Processing via ' + route.label + '...';
         document.getElementById('resultsPanel').classList.remove('visible');
 
         const startTime = performance.now();
         try {
-            const response = await fetch('/ws/simple/executeOcr', {
+            const response = await fetch(route.url, {
                 method: 'POST',
                 headers: {
-                    'Authorization': 'Basic ' + btoa('AgenticProcessBuilder@boomi_michaelgriffin-I59GZ7.HAD03L:c91fb69b-86d6-40ca-a03d-40f3f63fc68d')
+                    'Authorization': 'Basic ' + btoa(route.auth),
+                    'Content-Type': selectedFile.type || 'image/png',
                 },
                 body: selectedFile
             });
