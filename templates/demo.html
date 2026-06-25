@@ -867,44 +867,30 @@
     /* ── Run OCR ── */
     let testCount = 0;
 
-    const ENGINE_ROUTES = {
-        boomi_textract: {
-            url: '/ws/simple/executeOcr',
-            auth: 'AgenticProcessBuilder@boomi_michaelgriffin-I59GZ7.HAD03L:c91fb69b-86d6-40ca-a03d-40f3f63fc68d',
-            label: 'AWS Textract via Boomi WSS',
-        },
-        boomi_azure: {
-            url: '/ws/simple/executeAzureOcr',
-            auth: 'AgenticProcessBuilder@boomi_michaelgriffin-I59GZ7.HAD03L:c91fb69b-86d6-40ca-a03d-40f3f63fc68d',
-            label: 'Azure DI via Boomi WSS',
-        },
-        dtat_textract: {
-            url: '/ocr/ocr?format=text&engine=textract',
-            auth: 'dtat:ocr-grifftest1-2026',
-            label: 'AWS Textract (DTAT direct)',
-        },
-        dtat_azure: {
-            url: '/ocr/ocr?format=text&engine=azure_di',
-            auth: 'dtat:ocr-grifftest1-2026',
-            label: 'Azure DI (DTAT direct)',
-        },
+    // All four engines route through the same-origin /api/demo/run proxy.
+    // The proxy holds Boomi WSS + DTAT credentials server-side so they
+    // never reach the browser. Do not put auth tokens in this file.
+    const ENGINE_LABELS = {
+        boomi_textract: 'AWS Textract via Boomi WSS',
+        boomi_azure:    'Azure DI via Boomi WSS',
+        dtat_textract:  'AWS Textract (DTAT direct)',
+        dtat_azure:     'Azure DI (DTAT direct)',
     };
 
     async function runOCR() {
         if (!selectedFile) return;
         const choice = (document.querySelector('input[name="engine"]:checked') || {}).value || 'boomi_textract';
-        const route = ENGINE_ROUTES[choice];
+        const label = ENGINE_LABELS[choice] || choice;
         const btn = document.getElementById('runBtn');
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Processing via ' + route.label + '...';
+        btn.innerHTML = '<span class="spinner"></span> Processing via ' + label + '...';
         document.getElementById('resultsPanel').classList.remove('visible');
 
         const startTime = performance.now();
         try {
-            const response = await fetch(route.url, {
+            const response = await fetch('/ocr/api/demo/run?engine=' + encodeURIComponent(choice), {
                 method: 'POST',
                 headers: {
-                    'Authorization': 'Basic ' + btoa(route.auth),
                     'Content-Type': selectedFile.type || 'image/png',
                 },
                 body: selectedFile

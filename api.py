@@ -325,6 +325,85 @@ async def ui_api_docs(request: Request):
     })
 
 
+@app.post("/api/demo/run")
+async def demo_run(request: Request, engine: str = Query("boomi_textract")):
+    """Same-origin proxy for the public demo page.
+
+    Holds Boomi WSS + DTAT credentials server-side so demo.html can fetch
+    without embedding secrets in browser JavaScript. Open (no auth) — the
+    demo itself is public.
+
+    engine: boomi_textract | boomi_azure | dtat_textract | dtat_azure
+    """
+    from fastapi.responses import PlainTextResponse
+    import requests as _req
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty request body")
+
+    content_type = request.headers.get("content-type", "image/png")
+
+    # Boomi paths — proxy to the local Boomi WSS atom with server-held creds
+    if engine in ("boomi_textract", "boomi_azure"):
+        wss_user = os.getenv("BOOMI_WSS_USER", "")
+        wss_token = os.getenv("BOOMI_WSS_TOKEN", "")
+        wss_base = os.getenv("BOOMI_WSS_BASE_URL", "http://127.0.0.1:9090")
+        if not wss_user or not wss_token:
+            raise HTTPException(status_code=503, detail="Boomi WSS proxy not configured (BOOMI_WSS_USER/TOKEN env vars missing)")
+        endpoint = "/ws/simple/executeOcr" if engine == "boomi_textract" else "/ws/simple/executeAzureOcr"
+        try:
+            r = _req.post(
+                wss_base.rstrip("/") + endpoint,
+                data=body,
+                headers={"Content-Type": content_type},
+                auth=(wss_user, wss_token),
+                timeout=60,
+            )
+            return PlainTextResponse(content=r.text, status_code=r.status_code)
+        except _req.RequestException as e:
+            raise HTTPException(status_code=502, detail=f"Boomi WSS unreachable: {e}")
+
+    # DTAT-direct paths — bypass the network hop entirely, run in-process
+    if engine in ("dtat_textract", "dtat_azure"):
+        force = "textract" if engine == "dtat_textract" else "azure_di"
+
+        ext_map = {
+            "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+            "image/tiff": "tiff", "image/bmp": "bmp",
+            "application/pdf": "pdf", "application/octet-stream": "png",
+        }
+        file_type = ext_map.get(content_type.split(";")[0].strip().lower(), "png")
+        filename = f"demo_upload.{file_type}"
+
+        record = create_document_record(filename=filename, file_bytes=body, file_type=file_type)
+        record.id = save_document(record)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type}") as tmp:
+            tmp.write(body)
+            tmp_path = Path(tmp.name)
+        try:
+            pipeline = ExtractionPipeline()
+            result = pipeline.process(record, tmp_path, force_engine=force)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        if result.status != "completed":
+            raise HTTPException(status_code=422, detail=f"OCR failed: {result.error_message}")
+
+        doc = get_document(result.id)
+        content = doc.get_extracted_content()
+        if isinstance(content, dict) and "blocks" in content:
+            text = "\n".join(b.get("text", "") for b in content["blocks"] if b.get("text"))
+        elif isinstance(content, dict):
+            text = content.get("text", content.get("extracted_text", ""))
+        else:
+            text = str(content) if content else ""
+        return PlainTextResponse(content=text)
+
+    raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
+
+
 # =============================================================================
 # UI API ENDPOINTS (for HTMX)
 # =============================================================================
