@@ -308,6 +308,14 @@ async def ui_demo(request: Request):
     })
 
 
+@app.get("/ui/api-docs", response_class=HTMLResponse)
+async def ui_api_docs(request: Request):
+    """Swagger UI rendered inside the DTAT nav shell. /docs still works for direct access."""
+    return templates.TemplateResponse(request, "api_docs.html", context={
+        "active_page": "api-docs"
+    })
+
+
 # =============================================================================
 # UI API ENDPOINTS (for HTMX)
 # =============================================================================
