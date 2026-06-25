@@ -300,6 +300,14 @@ async def ui_settings(request: Request, username: str = Depends(verify_credentia
     })
 
 
+@app.get("/ui/demo", response_class=HTMLResponse)
+async def ui_demo(request: Request):
+    """Public-facing OCR demo / showcase page. No auth so customers can view."""
+    return templates.TemplateResponse(request, "demo.html", context={
+        "active_page": "demo"
+    })
+
+
 # =============================================================================
 # UI API ENDPOINTS (for HTMX)
 # =============================================================================

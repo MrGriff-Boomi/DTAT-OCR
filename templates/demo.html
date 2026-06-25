@@ -1,0 +1,906 @@
+{% extends "base.html" %}
+
+{% block title %}OCR Demo | Boomi Integration{% endblock %}
+
+{% block extra_head %}
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz48c3ZnIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAwIiBoZWlnaHQ9IjIwMDAiIHZpZXdCb3g9IjAgMCAyMDAwIDIwMDAiPjxkZWZzPjxzdHlsZT4uY2xzLTF7ZmlsbDojMDAzZDU4O30uY2xzLTJ7ZmlsbDojZmZmO30uY2xzLTN7ZmlsbDojZmY3YzY2O308L3N0eWxlPjwvZGVmcz48ZyBpZD0iQm9vbWlfSWNvbl9Mb2dvXzItQ29sb3JfUG9zaXRpdmVfUkdCIj48Zz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xOTM3LjMyLDEwMDBjMCw1MTcuNjctNDE5LjY2LDkzNy4zMy05MzcuMzMsOTM3LjMzUzYyLjY3LDE1MTcuNjcsNjIuNjcsMTAwMCw0ODIuMzMsNjIuNjgsMTAwMCw2Mi42OHM5MzcuMzMsNDE5LjY2LDkzNy4zMyw5MzcuMzMiLz48cGF0aCBjbGFzcz0iY2xzLTIiIGQ9Ik0xMDc2LjksNzg4LjA5Yy0xMTguMzQsMC0yMjIuMTUsNDIuODEtMjk4LjA4LDExMy41M1YzNDQuMDhjMC0xNC4wNS0xNS4yMS0yMi44My0yNy4zOC0xNS44MWwtMTM0LjQyLDc3LjYxYy0yLjk5LDEuNzItNC44Miw0LjktNC44Miw4LjM2VjE1OTQuNzFjMCwxMC4wOCw4LjE3LDE4LjI2LDE4LjI1LDE4LjI2aDEzMC4xMmMxMC4wNywwLDE4LjI1LTguMTgsMTguMjUtMTguMjZ2LTc4LjQxYzc1LjkzLDcwLjcxLDE3OS43NCwxMTMuNTMsMjk4LjA4LDExMy41MywyNDUuNzksMCw0MjkuMjktMTg0LjM0LDQyOS4yOS00MjAuODdzLTE4My40OS00MjAuODctNDI5LjI5LTQyMC44N20wLDY4NS4xOGMtMTUyLjM1LDAtMjYyLjYyLTExNS4zMi0yNjIuNjItMjY0LjMxczExMC4yNy0yNjQuMzIsMjYyLjYyLTI2NC4zMiwyNjIuNjIsMTE1LjMzLDI2Mi42MiwyNjQuMzItMTEwLjI3LDI2NC4zMS0yNjIuNjIsMjY0LjMxIi8+PHBhdGggY2xhc3M9ImNscy0zIiBkPSJNMTYwMC4yLDY4OS4yMWMwLDU3LjEyLTQ2LjMxLDEwMy40My0xMDMuNDMsMTAzLjQzcy0xMDMuNDMtNDYuMzEtMTAzLjQzLTEwMy40Myw0Ni4zMS0xMDMuNDMsMTAzLjQzLTEwMy40MywxMDMuNDMsNDYuMzEsMTAzLjQzLDEwMy40MyIvPjwvZz48L2c+PC9zdmc+">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+
+        :root {
+            --coral: #FF7C66;
+            --coral-light: #FFA899;
+            --navy: #033D58;
+            --navy-deep: #022A3E;
+            --white: #FFFFFF;
+            --blue: #009EE2;
+            --green: #04C788;
+            --purple: #A93FA5;
+            --slate-50: #F8FAFC;
+            --slate-100: #F1F5F9;
+            --slate-200: #E2E8F0;
+            --slate-300: #CBD5E1;
+            --slate-500: #64748B;
+            --slate-700: #334155;
+            --slate-900: #0F172A;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: "Poppins", -apple-system, sans-serif;
+            color: var(--navy);
+            background: var(--slate-50);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ── Hero ── */
+        .hero {
+            background: linear-gradient(135deg, var(--navy-deep) 0%, var(--navy) 50%, #064E6E 100%);
+            color: white;
+            padding: 3rem 0 2.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -10%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(255,124,102,0.12) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+        .hero-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            position: relative;
+        }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 100px;
+            padding: 0.35rem 1rem;
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--coral-light);
+            margin-bottom: 1.25rem;
+            backdrop-filter: blur(8px);
+        }
+        .hero h1 {
+            font-size: 2.6rem;
+            font-weight: 800;
+            line-height: 1.15;
+            margin-bottom: 0.75rem;
+            letter-spacing: -0.02em;
+        }
+        .hero h1 span { color: var(--coral); }
+        .hero p.subtitle {
+            font-size: 1.05rem;
+            font-weight: 300;
+            color: rgba(255,255,255,0.75);
+            max-width: 640px;
+            margin-bottom: 1.5rem;
+        }
+        .hero-metrics {
+            display: flex;
+            gap: 2.5rem;
+            margin-top: 1.5rem;
+        }
+        .hero-metric {
+            text-align: left;
+        }
+        .hero-metric .value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--coral);
+        }
+        .hero-metric .label {
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: rgba(255,255,255,0.55);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        /* ── Tabs ── */
+        .tabs-bar {
+            background: var(--white);
+            border-bottom: 1px solid var(--slate-200);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .tabs-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            gap: 0;
+            overflow-x: auto;
+        }
+        .tab-btn {
+            padding: 0.85rem 1.5rem;
+            font-family: inherit;
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--slate-500);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover { color: var(--navy); }
+        .tab-btn.active {
+            color: var(--coral);
+            border-bottom-color: var(--coral);
+            font-weight: 600;
+        }
+
+        /* ── Sections ── */
+        .section {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2.5rem 2rem;
+            display: none;
+        }
+        .section.active { display: block; }
+        .section-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: var(--navy);
+        }
+        .section-desc {
+            font-size: 0.92rem;
+            color: var(--slate-500);
+            margin-bottom: 2rem;
+            max-width: 700px;
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--white);
+            border-radius: 12px;
+            border: 1px solid var(--slate-200);
+            padding: 1.5rem;
+            transition: box-shadow 0.2s;
+        }
+        .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+        .card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--navy);
+        }
+        .card p { font-size: 0.85rem; color: var(--slate-500); }
+
+        /* ── Architecture Flow ── */
+        .arch-flow {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 2rem 0;
+        }
+        .arch-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1rem 1.2rem;
+            border-radius: 10px;
+            min-width: 120px;
+            text-align: center;
+            position: relative;
+        }
+        .arch-node .icon { font-size: 1.6rem; margin-bottom: 0.4rem; }
+        .arch-node .name { font-size: 0.78rem; font-weight: 600; }
+        .arch-node .detail { font-size: 0.65rem; font-weight: 400; opacity: 0.7; }
+        .arch-node.client { background: var(--slate-100); color: var(--slate-700); }
+        .arch-node.nginx { background: #E0F2FE; color: #0369A1; }
+        .arch-node.boomi { background: #FFF1EE; color: var(--coral); border: 2px solid var(--coral); }
+        .arch-node.dtat { background: #ECFDF5; color: #047857; }
+        .arch-node.aws { background: #FEF3C7; color: #92400E; }
+        .arch-arrow {
+            font-size: 1.2rem;
+            color: var(--slate-300);
+            margin: 0 0.25rem;
+            flex-shrink: 0;
+        }
+
+        /* ── Tech badges ── */
+        .tech-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+        }
+        .tech-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.3rem 0.75rem;
+            border-radius: 100px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            background: var(--slate-100);
+            color: var(--slate-700);
+            border: 1px solid var(--slate-200);
+        }
+        .tech-badge.primary { background: #FFF1EE; color: var(--coral); border-color: var(--coral-light); }
+        .tech-badge.green { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
+        .tech-badge.blue { background: #E0F2FE; color: #0369A1; border-color: #7DD3FC; }
+        .tech-badge.amber { background: #FEF3C7; color: #92400E; border-color: #FCD34D; }
+
+        /* ── Process Steps ── */
+        .process-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        .process-step {
+            background: var(--white);
+            border: 1px solid var(--slate-200);
+            border-radius: 10px;
+            padding: 1.25rem;
+            position: relative;
+        }
+        .process-step .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--coral);
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-bottom: 0.6rem;
+        }
+        .process-step h4 { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; color: var(--navy); }
+        .process-step p { font-size: 0.78rem; color: var(--slate-500); line-height: 1.5; }
+
+        /* ── Advantages Grid ── */
+        .advantages {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        .advantage-card {
+            background: var(--white);
+            border: 1px solid var(--slate-200);
+            border-radius: 10px;
+            padding: 1.25rem;
+        }
+        .advantage-card .adv-icon {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            font-size: 1.1rem;
+        }
+        .advantage-card h4 { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.3rem; }
+        .advantage-card p { font-size: 0.78rem; color: var(--slate-500); }
+
+        /* ── Component Table ── */
+        .comp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+            margin: 1.5rem 0;
+        }
+        .comp-table th {
+            text-align: left;
+            padding: 0.6rem 1rem;
+            background: var(--slate-50);
+            color: var(--slate-500);
+            font-weight: 600;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--slate-200);
+        }
+        .comp-table td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--slate-100);
+            color: var(--slate-700);
+        }
+        .comp-table code {
+            font-size: 0.75rem;
+            background: var(--slate-100);
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-family: "SF Mono", "Fira Code", monospace;
+        }
+
+        /* ── Live OCR Section ── */
+        .ocr-zone {
+            background: var(--white);
+            border: 2px dashed var(--slate-300);
+            border-radius: 12px;
+            padding: 2.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            margin-bottom: 1.5rem;
+        }
+        .ocr-zone:hover, .ocr-zone.drag-over {
+            border-color: var(--coral);
+            background: #FFF8F6;
+        }
+        .ocr-zone .icon-upload { font-size: 2.5rem; color: var(--slate-300); margin-bottom: 0.75rem; }
+        .ocr-zone p { font-size: 0.88rem; color: var(--slate-500); }
+        .ocr-zone p strong { color: var(--coral); font-weight: 600; }
+
+        .selected-file {
+            display: none;
+            background: var(--slate-50);
+            border: 1px solid var(--slate-200);
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+            align-items: center;
+            gap: 1rem;
+        }
+        .selected-file.visible { display: flex; }
+        .selected-file .file-icon { font-size: 1.8rem; color: var(--coral); }
+        .selected-file .file-info { flex: 1; }
+        .selected-file .file-name { font-weight: 600; font-size: 0.88rem; }
+        .selected-file .file-size { font-size: 0.75rem; color: var(--slate-500); }
+
+        .btn-run {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.7rem 2rem;
+            border-radius: 8px;
+            border: none;
+            font-family: inherit;
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--coral);
+            color: white;
+        }
+        .btn-run:hover { background: #E5614A; transform: translateY(-1px); }
+        .btn-run:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-run .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .results-panel {
+            display: none;
+            background: var(--white);
+            border: 1px solid var(--slate-200);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 1.5rem;
+        }
+        .results-panel.visible { display: block; }
+        .results-header {
+            display: flex;
+            gap: 1.5rem;
+            padding: 1rem 1.25rem;
+            background: var(--slate-50);
+            border-bottom: 1px solid var(--slate-200);
+            flex-wrap: wrap;
+        }
+        .result-metric { text-align: center; }
+        .result-metric .val { font-size: 1.1rem; font-weight: 700; color: var(--navy); }
+        .result-metric .val.success { color: var(--green); }
+        .result-metric .val.error { color: var(--coral); }
+        .result-metric .lbl { font-size: 0.65rem; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; }
+        .results-body {
+            padding: 1.25rem;
+        }
+        .results-body pre {
+            background: var(--slate-50);
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.82rem;
+            font-family: "SF Mono", "Fira Code", monospace;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            color: var(--slate-700);
+        }
+
+        /* ── History ── */
+        .history-table {
+            width: 100%;
+            font-size: 0.78rem;
+            border-collapse: collapse;
+            margin-top: 1.5rem;
+        }
+        .history-table th {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            color: var(--slate-500);
+            font-weight: 600;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--slate-200);
+        }
+        .history-table td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--slate-100);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 100px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .status-badge.ok { background: #ECFDF5; color: #047857; }
+        .status-badge.err { background: #FEF2F2; color: #DC2626; }
+
+        /* ── Footer ── */
+        footer {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            text-align: center;
+            font-size: 0.78rem;
+            color: var(--slate-500);
+            border-top: 1px solid var(--slate-200);
+        }
+        footer a { color: var(--coral); text-decoration: none; }
+
+        /* ── Callout ── */
+        .callout {
+            background: linear-gradient(135deg, #FFF1EE 0%, #FFF8F6 100%);
+            border-left: 3px solid var(--coral);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem 1.25rem;
+            margin: 1.5rem 0;
+            font-size: 0.85rem;
+        }
+        .callout strong { color: var(--coral); }
+
+        .link-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.5rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-decoration: none;
+            border: 1px solid var(--slate-200);
+            color: var(--navy);
+            background: var(--white);
+            transition: all 0.2s;
+        }
+        .link-btn:hover { border-color: var(--coral); color: var(--coral); }
+
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 1.8rem; }
+            .hero-metrics { flex-wrap: wrap; gap: 1.5rem; }
+            .arch-flow { flex-direction: column; }
+            .arch-arrow { transform: rotate(90deg); }
+        }
+    </style>
+<style>
+    /* Neuter base.html's max-width container so the demo's hero spans full width */
+    main { max-width: none !important; padding: 0 !important; }
+    /* Reset body styling that the demo overrides for itself */
+    body { background: var(--slate-50) !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ═══════ HERO ═══════ -->
+<header class="hero">
+    <div class="hero-inner">
+        <div class="hero-badge"><i class="ph ph-scan"></i> Document Intelligence</div>
+        <h1>AI-Powered <span>Document OCR</span></h1>
+        <p class="subtitle">Enterprise document extraction via Boomi Integration + AWS Textract. Upload any image, get structured text back in seconds &mdash; fully governed, auditable, and cloud-ready.</p>
+        <div class="hero-metrics">
+            <div class="hero-metric">
+                <div class="value">&lt; 3s</div>
+                <div class="label">Per Page</div>
+            </div>
+            <div class="hero-metric">
+                <div class="value">250</div>
+                <div class="label">Docs / Minute</div>
+            </div>
+            <div class="hero-metric">
+                <div class="value">90%+</div>
+                <div class="label">Confidence</div>
+            </div>
+            <div class="hero-metric">
+                <div class="value">20K+</div>
+                <div class="label">Docs / Day (Boomi)</div>
+            </div>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════ TABS ═══════ -->
+<nav class="tabs-bar">
+    <div class="tabs-inner">
+        <button class="tab-btn active" onclick="showTab('architecture')">Architecture</button>
+        <button class="tab-btn" onclick="showTab('process')">Boomi Process</button>
+        <button class="tab-btn" onclick="showTab('advantages')">Advantages</button>
+        <button class="tab-btn" onclick="showTab('live')">Live OCR Testing</button>
+        <button class="tab-btn" onclick="showTab('results')">Stored Results</button>
+    </div>
+</nav>
+
+<!-- ═══════ ARCHITECTURE ═══════ -->
+<div id="tab-architecture" class="section active">
+    <div class="section-title">Integration Architecture</div>
+    <div class="section-desc">A pure REST connector pattern &mdash; no scripting, no shell execution, no filesystem access. Runs identically on local atoms and Boomi cloud atoms.</div>
+
+    <div class="arch-flow">
+        <div class="arch-node client">
+            <div class="icon"><i class="ph ph-browser"></i></div>
+            <div class="name">Browser</div>
+            <div class="detail">Image Upload</div>
+        </div>
+        <div class="arch-arrow"><i class="ph ph-arrow-right"></i></div>
+        <div class="arch-node nginx">
+            <div class="icon"><i class="ph ph-shield-check"></i></div>
+            <div class="name">Nginx</div>
+            <div class="detail">Port 80 + CORS</div>
+        </div>
+        <div class="arch-arrow"><i class="ph ph-arrow-right"></i></div>
+        <div class="arch-node boomi">
+            <div class="icon"><i class="ph ph-flow-arrow"></i></div>
+            <div class="name">Boomi WSS</div>
+            <div class="detail">Port 9090</div>
+        </div>
+        <div class="arch-arrow"><i class="ph ph-arrow-right"></i></div>
+        <div class="arch-node dtat">
+            <div class="icon"><i class="ph ph-file-search"></i></div>
+            <div class="name">DTAT-OCR</div>
+            <div class="detail">REST API :5002</div>
+        </div>
+        <div class="arch-arrow"><i class="ph ph-arrow-right"></i></div>
+        <div class="arch-node aws">
+            <div class="icon"><i class="ph ph-cloud"></i></div>
+            <div class="name">AWS Textract</div>
+            <div class="detail">~1&ndash;3s / page</div>
+        </div>
+    </div>
+
+    <div class="callout">
+        <strong>Key Insight:</strong> The entire Boomi process is just 3 shapes &mdash; WSS Listener, REST Connector, Return Documents. Image binary flows straight from the inbound HTTP request to the Textract-backed service with zero transformation needed. Every request is logged in Boomi's execution reporting for full governance.
+    </div>
+
+    <div class="tech-badges">
+        <span class="tech-badge primary"><i class="ph ph-flow-arrow"></i> Boomi WSS</span>
+        <span class="tech-badge primary"><i class="ph ph-plugs-connected"></i> REST Connector</span>
+        <span class="tech-badge amber"><i class="ph ph-cloud"></i> AWS Textract</span>
+        <span class="tech-badge green"><i class="ph ph-file-search"></i> DTAT-OCR</span>
+        <span class="tech-badge blue"><i class="ph ph-shield-check"></i> Nginx</span>
+        <span class="tech-badge"><i class="ph ph-database"></i> SQLite</span>
+    </div>
+
+    <h3 style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1rem;">Infrastructure Details</h3>
+    <table class="comp-table">
+        <thead>
+            <tr><th>Layer</th><th>Component</th><th>Details</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Reverse Proxy</td><td>Nginx</td><td>Port 80, CORS headers, 10-min proxy timeout, forwards <code>/ws/</code> to Boomi</td></tr>
+            <tr><td>Integration</td><td>Boomi Atom</td><td>MG-CoEe-Runtime-Demos, port 9090, WSS endpoint <code>/ws/simple/executeOcr</code></td></tr>
+            <tr><td>OCR Service</td><td>DTAT-OCR</td><td>FastAPI on port 5002, REST API with Basic Auth, document storage</td></tr>
+            <tr><td>OCR Engine</td><td>AWS Textract</td><td>Text detection + table/form analysis, multi-page PDFs up to 5MB, ~1&ndash;3s/page</td></tr>
+            <tr><td>Storage</td><td>PostgreSQL</td><td>Concurrent writes, connection pooling, async job tracking. Viewable at <code>/ocr/ui/documents</code></td></tr>
+            <tr><td>Workers</td><td>4x uvicorn</td><td>Concurrent request handling, 250 docs/min direct, 41 docs/min via Boomi</td></tr>
+            <tr><td>Runtime</td><td>AWS EC2</td><td>t3.medium, us-east-1</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ═══════ BOOMI PROCESS ═══════ -->
+<div id="tab-process" class="section">
+    <div class="section-title">Boomi Process Design</div>
+    <div class="section-desc">Three shapes. Zero scripting. Cloud atom compatible. The simplest possible production OCR pipeline.</div>
+
+    <div class="process-steps">
+        <div class="process-step">
+            <div class="step-num">1</div>
+            <h4>WSS Listener</h4>
+            <p>Receives raw image binary via HTTP POST. Single-data input/output, <code>text/plain</code> response type. Endpoint: <code>executeOcr</code></p>
+        </div>
+        <div class="process-step">
+            <div class="step-num">2</div>
+            <h4>REST Connector</h4>
+            <p>Forwards binary payload to DTAT-OCR at <code>localhost:5002/ocr</code>. Basic Auth, 10-min read timeout, <code>Content-Type: image/png</code></p>
+        </div>
+        <div class="process-step">
+            <div class="step-num">3</div>
+            <h4>Return Documents</h4>
+            <p>Sends extracted text directly back to the HTTP caller. No transformation, no mapping &mdash; the OCR text IS the response.</p>
+        </div>
+    </div>
+
+    <div class="callout">
+        <strong>Why this matters:</strong> Traditional Boomi OCR used Groovy shell execution + Node.js + Disk connectors &mdash; a 7-shape process that couldn't run on cloud atoms. This pattern uses standard REST connectors only, works on any atom type, and is maintainable by any Boomi developer.
+    </div>
+
+    <h3 style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1rem;">Boomi Components</h3>
+    <table class="comp-table">
+        <thead>
+            <tr><th>Component</th><th>Type</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>OCR-DTAT-Process</strong></td><td>Process</td><td>Main listener: WSS &rarr; REST &rarr; Return</td></tr>
+            <tr><td>OCR_WSS_Execute_Operation</td><td>WSS Operation</td><td>Endpoint <code>executeOcr</code>, single-data I/O</td></tr>
+            <tr><td>DTAT_OCR_REST_Connection</td><td>REST Connection</td><td>Base URL <code>http://127.0.0.1:5002</code>, Basic Auth, 10-min timeout</td></tr>
+            <tr><td>DTAT_OCR_POST_Operation</td><td>REST Operation</td><td>POST <code>/ocr?format=text</code>, passthrough binary</td></tr>
+        </tbody>
+    </table>
+
+    <h3 style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1rem;">What DTAT-OCR Does Behind the Scenes</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+        <div class="card"><h3><i class="ph ph-upload-simple"></i> Receive</h3><p>Accepts raw image binary, detects file type from Content-Type header</p></div>
+        <div class="card"><h3><i class="ph ph-cloud"></i> Extract</h3><p>Calls AWS Textract <code>detect_document_text</code>, returns structured blocks</p></div>
+        <div class="card"><h3><i class="ph ph-database"></i> Store</h3><p>Saves document metadata + extracted content to SQLite database</p></div>
+        <div class="card"><h3><i class="ph ph-arrows-out-cardinal"></i> Format</h3><p>Returns text in Textract, Google Vision, Azure OCR, or native formats</p></div>
+    </div>
+</div>
+
+<!-- ═══════ ADVANTAGES ═══════ -->
+<div id="tab-advantages" class="section">
+    <div class="section-title">Why This Approach</div>
+    <div class="section-desc">Enterprise-grade OCR that's fast, governed, and infinitely extensible.</div>
+
+    <div class="advantages">
+        <div class="advantage-card">
+            <div class="adv-icon" style="background: #ECFDF5; color: #047857;"><i class="ph ph-cloud-check"></i></div>
+            <h4>Cloud Atom Compatible</h4>
+            <p>Pure REST connector pattern. No Groovy, no shell execution, no filesystem access. Runs on any Boomi atom type including managed cloud.</p>
+        </div>
+        <div class="advantage-card">
+            <div class="adv-icon" style="background: #FFF1EE; color: var(--coral);"><i class="ph ph-lightning"></i></div>
+            <h4>Sub-3 Second Extraction</h4>
+            <p>AWS Textract processes documents in 1&ndash;3 seconds. Compare to 3&ndash;8 minutes with local AI models on CPU.</p>
+        </div>
+        <div class="advantage-card">
+            <div class="adv-icon" style="background: #E0F2FE; color: #0369A1;"><i class="ph ph-chart-line-up"></i></div>
+            <h4>Full Boomi Reporting</h4>
+            <p>Every OCR request flows through Boomi. Execution history, document counts, error tracking &mdash; all visible in Process Reporting.</p>
+        </div>
+        <div class="advantage-card">
+            <div class="adv-icon" style="background: #FEF3C7; color: #92400E;"><i class="ph ph-files"></i></div>
+            <h4>Multi-Page PDFs</h4>
+            <p>Handles multi-page scanned PDFs up to 5MB with table and form detection. Digital PDFs extracted natively for free.</p>
+        </div>
+        <div class="advantage-card">
+            <div class="adv-icon" style="background: #F3E8FF; color: #7C3AED;"><i class="ph ph-rocket-launch"></i></div>
+            <h4>High-Volume Ready</h4>
+            <p>4 concurrent workers, PostgreSQL storage, async job queue. Tested at 250 docs/min direct, ~20K docs/day through Boomi.</p>
+        </div>
+        <div class="advantage-card">
+            <div class="adv-icon" style="background: var(--slate-100); color: var(--slate-700);"><i class="ph ph-arrows-out-cardinal"></i></div>
+            <h4>Multi-Format Output</h4>
+            <p>Drop-in replacement for Textract, Google Vision, and Azure OCR. Same JSON structure &mdash; zero code changes to migrate.</p>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════ LIVE OCR ═══════ -->
+<div id="tab-live" class="section">
+    <div class="section-title">Live OCR Testing</div>
+    <div class="section-desc">Upload an image to extract text via the live Boomi WSS endpoint. The request flows through the full architecture: Browser &rarr; Nginx &rarr; Boomi &rarr; DTAT-OCR &rarr; Textract.</div>
+
+    <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg" style="display:none" />
+
+    <div class="ocr-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <div class="icon-upload"><i class="ph ph-cloud-arrow-up"></i></div>
+        <p><strong>Click to upload</strong> or drag and drop</p>
+        <p style="font-size: 0.75rem; margin-top: 0.25rem;">PNG, JPG supported</p>
+    </div>
+
+    <div class="selected-file" id="selectedFile">
+        <div class="file-icon"><i class="ph ph-file-image"></i></div>
+        <div class="file-info">
+            <div class="file-name" id="fileName"></div>
+            <div class="file-size" id="fileSize"></div>
+        </div>
+        <button class="btn-run" id="runBtn" onclick="runOCR()">
+            <i class="ph ph-play"></i> Run OCR
+        </button>
+    </div>
+
+    <div class="results-panel" id="resultsPanel">
+        <div class="results-header">
+            <div class="result-metric">
+                <div class="val" id="metricStatus">-</div>
+                <div class="lbl">HTTP Status</div>
+            </div>
+            <div class="result-metric">
+                <div class="val" id="metricTime">-</div>
+                <div class="lbl">Response Time</div>
+            </div>
+            <div class="result-metric">
+                <div class="val" id="metricChars">-</div>
+                <div class="lbl">Characters</div>
+            </div>
+        </div>
+        <div class="results-body">
+            <pre id="resultText"></pre>
+        </div>
+    </div>
+
+    <h3 style="margin-top: 2rem; margin-bottom: 0.75rem; font-size: 1rem;">Test History</h3>
+    <table class="history-table">
+        <thead>
+            <tr><th>#</th><th>File</th><th>Status</th><th>Time</th><th>Characters</th><th>Timestamp</th></tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+    </table>
+</div>
+
+<!-- ═══════ STORED RESULTS ═══════ -->
+<div id="tab-results" class="section">
+    <div class="section-title">Stored Results</div>
+    <div class="section-desc">Every OCR extraction is persisted in the DTAT-OCR document store. Browse, search, and view extracted content for all processed documents.</div>
+
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+        <a href="/ui/documents" target="_blank" class="link-btn">
+            <i class="ph ph-table"></i> Document Management UI
+        </a>
+        <a href="/docs" target="_blank" class="link-btn">
+            <i class="ph ph-code"></i> API Documentation (Swagger)
+        </a>
+        <a href="/health" target="_blank" class="link-btn">
+            <i class="ph ph-heartbeat"></i> Health Check
+        </a>
+    </div>
+
+    <div class="callout">
+        <strong>Multi-Format API:</strong> Retrieve stored results in any format via <code>GET /documents/{id}/content?format=textract|google|azure|dtat</code>. This makes DTAT-OCR a drop-in replacement for any commercial OCR service.
+    </div>
+
+    <h3 style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1rem;">Available Endpoints</h3>
+    <table class="comp-table">
+        <thead>
+            <tr><th>Endpoint</th><th>Method</th><th>Auth</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>/health</code></td><td>GET</td><td>None</td><td>Service health check</td></tr>
+            <tr><td><code>/process</code></td><td>POST</td><td>Basic</td><td>Upload &amp; process document (multipart)</td></tr>
+            <tr><td><code>/ocr</code></td><td>POST</td><td>Basic</td><td>Raw binary OCR (Boomi passthrough)</td></tr>
+            <tr><td><code>/ocr/async</code></td><td>POST</td><td>Basic</td><td>Fire-and-forget OCR &mdash; returns job ID</td></tr>
+            <tr><td><code>/ocr/jobs/{id}</code></td><td>GET</td><td>Basic</td><td>Poll for async job result</td></tr>
+            <tr><td><code>/queue/status</code></td><td>GET</td><td>Basic</td><td>Queue depth, avg/p95 processing times</td></tr>
+            <tr><td><code>/documents</code></td><td>GET</td><td>Basic</td><td>List all stored documents</td></tr>
+            <tr><td><code>/documents/{id}/content</code></td><td>GET</td><td>Basic</td><td>Get extracted content (multi-format)</td></tr>
+            <tr><td><code>/stats</code></td><td>GET</td><td>Basic</td><td>Processing statistics</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ═══════ FOOTER ═══════ -->
+<footer>
+    <p>Built with <a href="https://boomi.com" target="_blank">Boomi</a> + <a href="https://aws.amazon.com/textract/" target="_blank">AWS Textract</a> | Boomi FDE Team</p>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    /* ── Tab Navigation ── */
+    function showTab(id) {
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + id).classList.add('active');
+        event.target.classList.add('active');
+    }
+
+    /* ── File Selection ── */
+    let selectedFile = null;
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) handleFile(e.target.files[0]);
+    });
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function handleFile(file) {
+        selectedFile = file;
+        document.getElementById('fileName').textContent = file.name;
+        document.getElementById('fileSize').textContent = (file.size / 1024).toFixed(1) + ' KB';
+        document.getElementById('selectedFile').classList.add('visible');
+        document.getElementById('resultsPanel').classList.remove('visible');
+    }
+
+    /* ── Run OCR ── */
+    let testCount = 0;
+
+    async function runOCR() {
+        if (!selectedFile) return;
+        const btn = document.getElementById('runBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Processing...';
+        document.getElementById('resultsPanel').classList.remove('visible');
+
+        const startTime = performance.now();
+        try {
+            const response = await fetch('/ws/simple/executeOcr', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Basic ' + btoa('AgenticProcessBuilder@boomi_michaelgriffin-I59GZ7.HAD03L:c91fb69b-86d6-40ca-a03d-40f3f63fc68d')
+                },
+                body: selectedFile
+            });
+            const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+            const text = await response.text();
+
+            document.getElementById('metricStatus').textContent = response.status + ' ' + response.statusText;
+            document.getElementById('metricStatus').className = 'val ' + (response.ok ? 'success' : 'error');
+            document.getElementById('metricTime').textContent = elapsed + 's';
+            document.getElementById('metricChars').textContent = text.length.toLocaleString();
+            document.getElementById('resultText').textContent = text || '(empty response)';
+            document.getElementById('resultsPanel').classList.add('visible');
+
+            addHistory(selectedFile.name, response.status, elapsed, text.length);
+        } catch (err) {
+            const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+            document.getElementById('metricStatus').textContent = 'Error';
+            document.getElementById('metricStatus').className = 'val error';
+            document.getElementById('metricTime').textContent = elapsed + 's';
+            document.getElementById('metricChars').textContent = '-';
+            document.getElementById('resultText').textContent = 'Request failed: ' + err.message;
+            document.getElementById('resultsPanel').classList.add('visible');
+            addHistory(selectedFile.name, 'ERR', elapsed, 0);
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="ph ph-play"></i> Run OCR';
+    }
+
+    function addHistory(file, status, time, chars) {
+        testCount++;
+        const row = document.createElement('tr');
+        const isOk = typeof status === 'number' && status >= 200 && status < 300;
+        row.innerHTML = `
+            <td>${testCount}</td>
+            <td>${file}</td>
+            <td><span class="status-badge ${isOk ? 'ok' : 'err'}">${status}</span></td>
+            <td>${time}s</td>
+            <td>${chars.toLocaleString()}</td>
+            <td>${new Date().toLocaleTimeString()}</td>
+        `;
+        const tbody = document.getElementById('historyBody');
+        tbody.insertBefore(row, tbody.firstChild);
+    }
+</script>
+{% endblock %}
