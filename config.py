@@ -37,6 +37,15 @@ class ProcessingConfig:
     s3_bucket: str = field(default_factory=lambda: os.getenv("S3_BUCKET", ""))
     s3_prefix: str = field(default_factory=lambda: os.getenv("S3_PREFIX", "dtat-ocr/temp/"))
 
+    # Azure Document Intelligence settings
+    enable_azure_di: bool = field(default_factory=lambda: os.getenv("AZURE_DI_ENABLED", "false").lower() == "true")
+    azure_di_endpoint: str = field(default_factory=lambda: os.getenv("AZURE_DI_ENDPOINT", ""))
+    azure_di_key: str = field(default_factory=lambda: os.getenv("AZURE_DI_KEY", ""))
+    azure_di_api_version: str = field(default_factory=lambda: os.getenv("AZURE_DI_API_VERSION", "2024-11-30"))
+    azure_di_default_model: str = field(default_factory=lambda: os.getenv("AZURE_DI_DEFAULT_MODEL", "prebuilt-layout"))
+    azure_di_poll_interval_s: float = 1.0
+    azure_di_poll_timeout_s: int = 120
+
     # Database settings
     database_url: str = field(default_factory=lambda: os.getenv(
         "DATABASE_URL",

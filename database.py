@@ -99,6 +99,7 @@ class ExtractionMethod(Enum):
     NATIVE = "native"           # PyMuPDF, pandas, python-docx
     LOCAL_OCR = "local_ocr"     # LightOnOCR
     TEXTRACT = "textract"       # AWS Textract
+    AZURE_DI = "azure_di"       # Azure AI Document Intelligence
     MANUAL = "manual"           # Human review
 
 

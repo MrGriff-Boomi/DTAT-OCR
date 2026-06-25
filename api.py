@@ -243,6 +243,7 @@ class HealthResponse(BaseModel):
     database: str
     ocr_model: str
     textract_enabled: bool
+    azure_di_enabled: bool = False
     offline_mode: bool
 
 
@@ -597,6 +598,7 @@ async def health_check():
         database=db_status,
         ocr_model=config.ocr_model_name,
         textract_enabled=config.enable_textract,
+        azure_di_enabled=config.enable_azure_di,
         offline_mode=config.ocr_offline_mode
     )
 
@@ -668,6 +670,7 @@ async def process_document_sync(
 async def ocr_raw_binary(
     request: Request,
     format: str = Query("text", description="Output format: text, json, textract, google, azure"),
+    engine: Optional[str] = Query(None, description="Pin OCR engine: textract, azure_di, local_ocr, native. Default = cascade."),
     username: str = Depends(verify_credentials)
 ):
     """
@@ -706,8 +709,9 @@ async def ocr_raw_binary(
 
     filename = f"boomi_upload.{file_type}"
 
-    # Dedup check — return cached result if same file was already processed
-    if config.enable_dedup:
+    # Dedup check — return cached result if same file was already processed.
+    # Skip dedup when an engine is explicitly pinned (caller wants the named engine, not whatever's cached).
+    if config.enable_dedup and not engine:
         from database import compute_content_hash, find_duplicate
         content_hash = compute_content_hash(contents)
         existing = find_duplicate(content_hash)
@@ -749,7 +753,7 @@ async def ocr_raw_binary(
 
     try:
         pipeline = ExtractionPipeline()
-        result = pipeline.process(record, tmp_path)
+        result = pipeline.process(record, tmp_path, force_engine=engine)
     finally:
         tmp_path.unlink(missing_ok=True)
 

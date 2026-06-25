@@ -984,6 +984,140 @@ class TextractExtractor:
             )
 
 
+class AzureDIExtractor:
+    """Azure AI Document Intelligence engine. Peer of TextractExtractor.
+
+    Submit-poll-retrieve pattern:
+      POST {endpoint}/documentintelligence/documentModels/{model}:analyze  -> 202 + Operation-Location
+      GET  {Operation-Location}  -> {"status": "running"|"succeeded"|"failed", "analyzeResult": {...}}
+    """
+
+    _CONTENT_TYPES = {
+        "pdf": "application/pdf",
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "tiff": "image/tiff", "tif": "image/tiff", "bmp": "image/bmp",
+    }
+
+    @classmethod
+    def extract(cls, file_path: Path, file_type: str) -> ExtractionResult:
+        import requests
+        start_time = time.time()
+
+        if not config.enable_azure_di:
+            return ExtractionResult(
+                success=False, text_content="", tables=[], metadata={},
+                confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                error_message="Azure DI is disabled in config",
+                processing_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        if not config.azure_di_endpoint or not config.azure_di_key:
+            return ExtractionResult(
+                success=False, text_content="", tables=[], metadata={},
+                confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                error_message="Azure DI endpoint/key not configured",
+                processing_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        model = config.azure_di_default_model
+        endpoint = config.azure_di_endpoint.rstrip("/")
+        url = f"{endpoint}/documentintelligence/documentModels/{model}:analyze?api-version={config.azure_di_api_version}"
+        content_type = cls._CONTENT_TYPES.get(file_type.lower(), "application/octet-stream")
+        headers = {
+            "Ocp-Apim-Subscription-Key": config.azure_di_key,
+            "Content-Type": content_type,
+        }
+
+        try:
+            with open(file_path, "rb") as f:
+                body = f.read()
+
+            submit = requests.post(url, headers=headers, data=body, timeout=30)
+            if submit.status_code != 202:
+                return ExtractionResult(
+                    success=False, text_content="", tables=[], metadata={"http_status": submit.status_code},
+                    confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                    error_message=f"Azure DI submit HTTP {submit.status_code}: {submit.text[:200]}",
+                    processing_time_ms=int((time.time() - start_time) * 1000),
+                )
+
+            poll_url = submit.headers.get("Operation-Location") or submit.headers.get("operation-location")
+            if not poll_url:
+                return ExtractionResult(
+                    success=False, text_content="", tables=[], metadata={},
+                    confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                    error_message="Azure DI did not return Operation-Location header",
+                    processing_time_ms=int((time.time() - start_time) * 1000),
+                )
+
+            poll_headers = {"Ocp-Apim-Subscription-Key": config.azure_di_key}
+            deadline = time.time() + config.azure_di_poll_timeout_s
+            payload = None
+            while time.time() < deadline:
+                poll = requests.get(poll_url, headers=poll_headers, timeout=15)
+                if poll.status_code != 200:
+                    time.sleep(config.azure_di_poll_interval_s)
+                    continue
+                payload = poll.json()
+                status = payload.get("status")
+                if status == "succeeded":
+                    break
+                if status == "failed":
+                    return ExtractionResult(
+                        success=False, text_content="", tables=[],
+                        metadata={"azure_status": status, "errors": payload.get("errors")},
+                        confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                        error_message=f"Azure DI analysis failed: {payload.get('errors')}",
+                        processing_time_ms=int((time.time() - start_time) * 1000),
+                    )
+                time.sleep(config.azure_di_poll_interval_s)
+
+            if not payload or payload.get("status") != "succeeded":
+                return ExtractionResult(
+                    success=False, text_content="", tables=[],
+                    metadata={"azure_status": (payload or {}).get("status")},
+                    confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                    error_message=f"Azure DI poll timeout after {config.azure_di_poll_timeout_s}s",
+                    processing_time_ms=int((time.time() - start_time) * 1000),
+                )
+
+            analyze = payload.get("analyzeResult", {})
+            text_content = analyze.get("content", "") or ""
+            tables = analyze.get("tables", []) or []
+            pages = analyze.get("pages", []) or []
+            confidences = []
+            for p in pages:
+                for w in p.get("words", []) or []:
+                    c = w.get("confidence")
+                    if isinstance(c, (int, float)):
+                        confidences.append(float(c))
+            avg_conf = (sum(confidences) / len(confidences) * 100.0) if confidences else 90.0
+
+            return ExtractionResult(
+                success=True,
+                text_content=text_content,
+                tables=tables,
+                metadata={
+                    "azure_model": analyze.get("modelId", model),
+                    "azure_api_version": analyze.get("apiVersion", config.azure_di_api_version),
+                    "page_count": len(pages),
+                    "table_count": len(tables),
+                    "word_count": sum(len(p.get("words", []) or []) for p in pages),
+                    "raw_analyze_result": analyze,
+                },
+                confidence_score=round(avg_conf, 2),
+                method_used=ExtractionMethod.AZURE_DI.value,
+                processing_time_ms=int((time.time() - start_time) * 1000),
+            )
+        except Exception as e:
+            return ExtractionResult(
+                success=False, text_content="", tables=[], metadata={},
+                confidence_score=0, method_used=ExtractionMethod.AZURE_DI.value,
+                error_message=f"{type(e).__name__}: {str(e)}",
+                processing_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+
 # =============================================================================
 # MAIN PIPELINE
 # =============================================================================
@@ -996,9 +1130,14 @@ class ExtractionPipeline:
     def __init__(self, cfg: ProcessingConfig = None):
         self.config = cfg or config
 
-    def process(self, document: DocumentRecord, file_path: Path) -> DocumentRecord:
+    def process(self, document: DocumentRecord, file_path: Path, force_engine: Optional[str] = None) -> DocumentRecord:
         """
         Process a document through the extraction ladder.
+
+        Args:
+            force_engine: Pin to a specific engine (skip cascade).
+                Accepts: "azure_di", "textract", "local_ocr", "native".
+                When None (default), runs the full cascade.
         Returns updated document record.
         """
         document.status = ProcessingStatus.PROCESSING.value
@@ -1009,6 +1148,27 @@ class ExtractionPipeline:
         is_image = file_type in ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'gif', 'webp']
         levels_tried = []
         attempt_number = 0
+
+        # Engine pin: skip the cascade, run only the requested engine.
+        if force_engine:
+            engine_map = {
+                "native": (NativeExtractor.extract, "native"),
+                "local_ocr": (LocalOCRExtractor.extract, "local_ocr"),
+                "textract": (TextractExtractor.extract, "textract"),
+                "azure_di": (AzureDIExtractor.extract, "azure_di"),
+            }
+            choice = engine_map.get(force_engine)
+            if not choice:
+                # Unknown pin — fall through to cascade
+                pass
+            else:
+                fn, label = choice
+                attempt_number += 1
+                result = self._try_extraction(document, file_path, file_type, fn, label, attempt_number)
+                levels_tried.append(f"{label}_pinned")
+                if result.success:
+                    return self._finalize_success(document, result, levels_tried)
+                return self._finalize_failure(document, result, levels_tried)
 
         # Level 1: Native extraction (skip for images)
         if self.config.enable_native_extraction and not is_image:
