@@ -250,6 +250,8 @@ class HealthResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     enable_local_ocr: Optional[bool] = None
     enable_textract: Optional[bool] = None
+    enable_azure_di: Optional[bool] = None
+    azure_di_default_model: Optional[str] = None
     min_confidence_score: Optional[int] = None
     max_retries_per_level: Optional[int] = None
     force_cpu: Optional[bool] = None
@@ -295,6 +297,12 @@ async def ui_settings(request: Request, username: str = Depends(verify_credentia
         "aws_access_key_masked": mask_value(aws_key, 4) if aws_key else "",
         "aws_secret_key_masked": mask_value(aws_secret, 4) if aws_secret else "",
         "aws_region": config.aws_region,
+        "aws_configured": bool(aws_key and aws_secret),
+        "azure_di_endpoint": config.azure_di_endpoint,
+        "azure_di_key_masked": mask_value(config.azure_di_key, 4) if config.azure_di_key else "",
+        "azure_di_api_version": config.azure_di_api_version,
+        "azure_di_default_model": config.azure_di_default_model,
+        "azure_configured": bool(config.azure_di_endpoint and config.azure_di_key),
         "auth_username": API_USERNAME,
         "auth_password_masked": "*" * len(API_PASSWORD) if API_PASSWORD else "",
         "database_url_masked": mask_value(db_url, 15) if db_url else "",
@@ -562,6 +570,10 @@ async def update_settings(settings: SettingsUpdate, username: str = Depends(veri
         config.enable_local_ocr = settings.enable_local_ocr
     if settings.enable_textract is not None:
         config.enable_textract = settings.enable_textract
+    if settings.enable_azure_di is not None:
+        config.enable_azure_di = settings.enable_azure_di
+    if settings.azure_di_default_model is not None:
+        config.azure_di_default_model = settings.azure_di_default_model
     if settings.min_confidence_score is not None:
         config.min_confidence_score = settings.min_confidence_score
     if settings.max_retries_per_level is not None:
