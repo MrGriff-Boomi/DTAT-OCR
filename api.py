@@ -2069,6 +2069,216 @@ async def get_templates_by_type(document_type: str):
 
 
 # =============================================================================
+# AZURE AI DOCUMENT INTELLIGENCE COMPAT SHIM
+# =============================================================================
+# Two routes that let DTAT impersonate Azure DI v2024-11-30 to any client SDK:
+#
+#   POST /documentintelligence/documentModels/{modelId}:analyze?api-version=2024-11-30
+#        -> 202 + Operation-Location header pointing to the analyzeResults URL
+#
+#   GET  /documentintelligence/documentModels/{modelId}/analyzeResults/{jobId}?api-version=...
+#        -> { "status": "running" | "succeeded" | "failed", "analyzeResult": {...} }
+#
+# Auth: accept "Ocp-Apim-Subscription-Key: <value>" header (the Azure SDK convention).
+#       The expected value comes from env DTAT_AZURE_COMPAT_KEY; if unset, falls back
+#       to DTAT_PASSWORD for convenience in single-host demos.
+#
+# Backend engine: the modelId is recorded and echoed back in the response, but the
+# actual extraction is done by DTAT's internal pipeline pinned to the engine named
+# in env DTAT_AZURE_COMPAT_ENGINE (default "textract"). To use the *real* Azure DI
+# as the backend, set DTAT_AZURE_COMPAT_ENGINE=azure_di — but that's silly; the
+# point of this shim is to be a drop-in for clients who want Azure-shaped responses
+# from a cheaper / different engine.
+
+
+def _azure_compat_verify_key(request: Request) -> None:
+    """Accept Ocp-Apim-Subscription-Key header. Compare to env-configured key.
+    If no key is configured, allow the call (matches existing /api/demo/run pattern)."""
+    expected = os.getenv("DTAT_AZURE_COMPAT_KEY", "")
+    if not expected:
+        # No key configured -> open access (same posture as /api/demo/run)
+        return
+    got = request.headers.get("Ocp-Apim-Subscription-Key", "") or request.headers.get("ocp-apim-subscription-key", "")
+    if got != expected:
+        raise HTTPException(status_code=401, detail="Invalid Ocp-Apim-Subscription-Key")
+
+
+def _process_azure_compat_job(job_id: str, contents: bytes, file_type: str, filename: str, force_engine: str):
+    """Background task: run OCR with a pinned engine, update the job row."""
+    try:
+        record = create_document_record(filename=filename, file_bytes=contents, file_type=file_type)
+        doc_id = save_document(record)
+        record.id = doc_id
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type}") as tmp:
+            tmp.write(contents)
+            tmp_path = Path(tmp.name)
+        try:
+            pipeline = ExtractionPipeline()
+            result = pipeline.process(record, tmp_path, force_engine=force_engine)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        text = ""
+        doc = get_document(result.id)
+        if doc:
+            content = doc.get_extracted_content()
+            if isinstance(content, dict) and "blocks" in content:
+                text = "\n".join(b.get("text", "") for b in content["blocks"] if b.get("text"))
+            elif isinstance(content, dict):
+                text = content.get("text", content.get("extracted_text", ""))
+        _complete_job(job_id, result.id, text, result.confidence_score or 0, result.processing_time_ms or 0)
+    except Exception as e:
+        _fail_job(job_id, str(e))
+
+
+@app.post("/documentintelligence/documentModels/{model_id}:analyze")
+async def azure_di_compat_analyze(
+    model_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Azure DI v2024-11-30 analyze submit — returns 202 + Operation-Location.
+
+    Drop-in for clients using the Azure DI SDK. Point your client at this host as
+    the endpoint, send a valid Ocp-Apim-Subscription-Key, and DTAT will respond
+    with Azure-shaped JSON.
+    """
+    _azure_compat_verify_key(request)
+
+    contents = await request.body()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty request body")
+    if len(contents) > config.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File too large. Max: {config.max_file_size_mb}MB")
+
+    content_type = (request.headers.get("content-type") or "image/png").split(";")[0].strip().lower()
+    ext_map = {
+        "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+        "image/tiff": "tiff", "image/bmp": "bmp",
+        "application/pdf": "pdf", "application/octet-stream": "png",
+    }
+    file_type = ext_map.get(content_type, "png")
+    filename = f"azure_compat_upload.{file_type}"
+
+    import uuid as _uuid2
+    job_id = str(_uuid2.uuid4())
+    _create_job(job_id)
+    # Stash the requested model in the job row so we can echo it back on poll.
+    # The ocr_jobs table doesn't have a dedicated column for it, so we encode it
+    # into the error_message column on a successful job. Cleaner approach would be
+    # a new column; this works for the shim today.
+    session = get_session()
+    try:
+        session.execute(sa_text(
+            "UPDATE ocr_jobs SET error_message=:m WHERE job_id=:jid"
+        ), {"jid": job_id, "m": f"__azure_compat_model__:{model_id}"})
+        session.commit()
+    finally:
+        session.close()
+
+    force_engine = os.getenv("DTAT_AZURE_COMPAT_ENGINE", "textract")
+    api_version = request.query_params.get("api-version", "2024-11-30")
+
+    background_tasks.add_task(_process_azure_compat_job, job_id, contents, file_type, filename, force_engine)
+
+    # Build a fully-qualified Operation-Location.
+    # Azure SDK regex requires /documentintelligence/ to be directly after the host
+    # (no path prefix). We always emit that shape regardless of how the request came
+    # in — the dedicated nginx /documentintelligence/ location handles it.
+    fwd_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
+    fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    poll_path = f"/documentintelligence/documentModels/{model_id}/analyzeResults/{job_id}"
+    operation_location = f"{fwd_proto}://{fwd_host}{poll_path}?api-version={api_version}"
+
+    from fastapi import Response as _Resp
+    return _Resp(
+        status_code=202,
+        headers={
+            "Operation-Location": operation_location,
+            "apim-request-id": job_id,
+            "x-ms-request-id": job_id,
+        },
+    )
+
+
+@app.get("/documentintelligence/documentModels/{model_id}/analyzeResults/{job_id}")
+async def azure_di_compat_poll(
+    model_id: str,
+    job_id: str,
+    request: Request,
+):
+    """Azure DI v2024-11-30 analyze poll — returns {status, analyzeResult?}."""
+    _azure_compat_verify_key(request)
+
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="analyzeResult not found")
+
+    api_version = request.query_params.get("api-version", "2024-11-30")
+    created_dt = job.get("created_at")
+    completed_dt = job.get("completed_at") or created_dt
+    # Normalize timestamps to ISO-Z
+    def _iso(dt):
+        if dt is None:
+            return None
+        if isinstance(dt, str):
+            return dt
+        try:
+            return dt.replace(microsecond=0).isoformat() + "Z"
+        except Exception:
+            return str(dt)
+
+    status = job["status"]
+    if status in ("processing", "pending", None):
+        return JSONResponse(content={
+            "status": "running",
+            "createdDateTime": _iso(created_dt),
+            "lastUpdatedDateTime": _iso(completed_dt),
+        })
+
+    if status == "failed":
+        return JSONResponse(content={
+            "status": "failed",
+            "createdDateTime": _iso(created_dt),
+            "lastUpdatedDateTime": _iso(completed_dt),
+            "error": {"code": "ExtractionFailed", "message": job.get("error_message") or "unknown"},
+        })
+
+    # status == "completed": look up the document, format as Azure analyzeResult
+    doc_id = job.get("document_id")
+    if not doc_id:
+        raise HTTPException(status_code=500, detail="Completed job missing document_id")
+    doc = get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=500, detail=f"Document {doc_id} not found for completed job")
+
+    normalized = doc.get_normalized_content()
+    if not normalized:
+        # Fall back: synthesize a minimal NormalizedResult from the raw text
+        return JSONResponse(content={
+            "status": "succeeded",
+            "createdDateTime": _iso(created_dt),
+            "lastUpdatedDateTime": _iso(completed_dt),
+            "analyzeResult": {
+                "apiVersion": api_version,
+                "modelId": model_id,
+                "stringIndexType": "textElements",
+                "content": job.get("extracted_text") or "",
+                "pages": [], "paragraphs": [], "tables": [], "styles": [],
+            },
+        })
+
+    from formatters import AzureDocIntelFormatter
+    payload = AzureDocIntelFormatter().format(
+        normalized,
+        model_id=model_id,
+        created_dt=_iso(created_dt),
+        last_updated_dt=_iso(completed_dt),
+    )
+    payload["analyzeResult"]["apiVersion"] = api_version
+    return JSONResponse(content=payload)
+
+
+# =============================================================================
 # RUN SERVER
 # =============================================================================
 

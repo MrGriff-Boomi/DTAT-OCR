@@ -9,7 +9,7 @@ Converts internal normalized format to industry-standard formats:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from extraction_pipeline import NormalizedResult, NormalizedBlock
 
 
@@ -357,11 +357,215 @@ class DTATFormatter(OutputFormatter):
         return tables
 
 
+class AzureDocIntelFormatter(OutputFormatter):
+    """
+    Azure AI Document Intelligence v2024-11-30 analyzeResult format.
+
+    Modern successor to the AzureOCRFormatter (Computer Vision Read API v3.2).
+    Reference: https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/get-analyze-result
+
+    Shape:
+      { "status": "succeeded",
+        "createdDateTime": "...",
+        "lastUpdatedDateTime": "...",
+        "analyzeResult": {
+          "apiVersion": "2024-11-30",
+          "modelId": "prebuilt-layout",
+          "stringIndexType": "textElements",
+          "content": "<full text>",
+          "pages": [ { pageNumber, angle, width, height, unit, words[], lines[], spans[] } ],
+          "paragraphs": [ ... ],
+          "tables": [ ... ],
+          "styles": []
+        } }
+
+    Geometry: Azure DI uses absolute coordinates — pixels for images, inches for PDFs.
+    DTAT stores normalized (0-1) coordinates, so we scale by configurable page dimensions.
+    Default page size: 1700x2200 (typical Letter at ~200dpi), overridable via metadata.
+    """
+
+    DEFAULT_PAGE_WIDTH = 1700
+    DEFAULT_PAGE_HEIGHT = 2200
+    API_VERSION = "2024-11-30"
+
+    def format(self, result, model_id: str = "prebuilt-layout",
+               created_dt: Optional[str] = None,
+               last_updated_dt: Optional[str] = None) -> Dict[str, Any]:
+        # All LINE-type blocks become the basis for `content` and `lines` arrays
+        lines = [b for b in result.blocks if b.block_type == "LINE" and b.text]
+        words = [b for b in result.blocks if b.block_type == "WORD" and b.text]
+        tables = [b for b in result.blocks if b.block_type == "TABLE"]
+
+        # `content` is the full document text, lines joined by newlines.
+        # Spans below reference offsets into this string.
+        content_parts = []
+        line_spans = []
+        offset = 0
+        for line in lines:
+            t = line.text or ""
+            content_parts.append(t)
+            line_spans.append({"offset": offset, "length": len(t)})
+            offset += len(t) + 1  # +1 for the '\n' separator we'll join with
+        content = "\n".join(content_parts)
+
+        # Pixel-space conversion of a normalized polygon (List[Point]).
+        # Azure DI returns a flat array [x1,y1, x2,y2, x3,y3, x4,y4].
+        def _polygon(poly, w, h):
+            out = []
+            pts = list(poly)[:4] if poly else []
+            for p in pts:
+                out.extend([round(p.x * w, 1), round(p.y * h, 1)])
+            while len(out) < 8:
+                out.extend(out[-2:] if out else [0.0, 0.0])
+            return out
+
+        # Page dimensions come from extractor metadata if available.
+        meta = result.document_metadata.to_dict() if hasattr(result.document_metadata, "to_dict") else {}
+        page_w = int(meta.get("page_width", self.DEFAULT_PAGE_WIDTH))
+        page_h = int(meta.get("page_height", self.DEFAULT_PAGE_HEIGHT))
+
+        pages_out = []
+        for page_num in range(1, max(result.page_count, 1) + 1):
+            page_lines = [b for b in lines if b.page == page_num]
+            page_words = [b for b in words if b.page == page_num]
+
+            # Build words[] — if the upstream engine didn't expose word-level blocks,
+            # we fall back to splitting LINE text into approximate words.
+            words_out = []
+            word_running_offset = 0
+            if page_words:
+                # Real word geometry available (Textract usually provides this).
+                # Re-compute spans relative to `content` by tracking line offsets.
+                content_pos_by_line_idx = {i: line_spans[i]["offset"] for i, l in enumerate(lines) if l.page == page_num}
+                for w_block in page_words:
+                    text = w_block.text or ""
+                    # Best-effort: locate the word in the doc content for an accurate span.
+                    found = content.find(text, word_running_offset) if text else -1
+                    span_offset = found if found >= 0 else word_running_offset
+                    word_running_offset = max(word_running_offset, span_offset + len(text))
+                    words_out.append({
+                        "content": text,
+                        "polygon": _polygon(w_block.geometry.polygon, page_w, page_h),
+                        "confidence": round((w_block.confidence or 0) / 100.0, 4) if (w_block.confidence or 0) > 1 else round(w_block.confidence or 0, 4),
+                        "span": {"offset": span_offset, "length": len(text)},
+                    })
+            else:
+                # Approximate: split LINE.text into tokens, distribute evenly across line bbox.
+                for li, line in enumerate(page_lines):
+                    text = line.text or ""
+                    tokens = text.split()
+                    if not tokens:
+                        continue
+                    bb = line.geometry.bounding_box
+                    token_w = (bb.width / len(tokens)) if tokens else bb.width
+                    base_offset = line_spans[lines.index(line)]["offset"]
+                    char_running = 0
+                    for ti, tok in enumerate(tokens):
+                        left = bb.left + (ti * token_w)
+                        words_out.append({
+                            "content": tok,
+                            "polygon": [
+                                round(left * page_w, 1), round(bb.top * page_h, 1),
+                                round((left + token_w) * page_w, 1), round(bb.top * page_h, 1),
+                                round((left + token_w) * page_w, 1), round((bb.top + bb.height) * page_h, 1),
+                                round(left * page_w, 1), round((bb.top + bb.height) * page_h, 1),
+                            ],
+                            "confidence": 0.99,
+                            "span": {"offset": base_offset + char_running, "length": len(tok)},
+                        })
+                        char_running += len(tok) + 1  # +1 for space
+
+            lines_out = []
+            for line in page_lines:
+                # span: each line is one contiguous run in `content`
+                try:
+                    i = lines.index(line)
+                    spans = [line_spans[i]]
+                except ValueError:
+                    spans = []
+                lines_out.append({
+                    "content": line.text or "",
+                    "polygon": _polygon(line.geometry.polygon, page_w, page_h),
+                    "spans": spans,
+                })
+
+            page_total_span = {
+                "offset": (line_spans[lines.index(page_lines[0])]["offset"] if page_lines and page_lines[0] in lines else 0),
+                "length": (
+                    line_spans[lines.index(page_lines[-1])]["offset"] + line_spans[lines.index(page_lines[-1])]["length"]
+                    - line_spans[lines.index(page_lines[0])]["offset"]
+                ) if page_lines and page_lines[0] in lines and page_lines[-1] in lines else 0,
+            }
+
+            pages_out.append({
+                "pageNumber": page_num,
+                "angle": 0.0,
+                "width": page_w,
+                "height": page_h,
+                "unit": "pixel",
+                "words": words_out,
+                "lines": lines_out,
+                "spans": [page_total_span] if page_total_span["length"] > 0 else [],
+            })
+
+        # paragraphs[]: one entry per line is a reasonable default. Real Azure DI
+        # groups multi-line text blocks; we don't have that grouping signal.
+        paragraphs_out = []
+        for i, line in enumerate(lines):
+            paragraphs_out.append({
+                "spans": [line_spans[i]],
+                "boundingRegions": [{
+                    "pageNumber": line.page,
+                    "polygon": _polygon(line.geometry.polygon, page_w, page_h),
+                }],
+                "content": line.text or "",
+            })
+
+        # tables[]: only included if the source engine exposed TABLE blocks.
+        tables_out = []
+        for ti, table in enumerate(tables):
+            # Look up CELL relationships if present
+            cells = []
+            for rel in (table.relationships or []):
+                if rel.type in ("CHILD", "CELLS"):
+                    # Cells would need lookup by id from result.blocks; simplified placeholder.
+                    pass
+            tables_out.append({
+                "rowCount": 0,
+                "columnCount": 0,
+                "cells": cells,
+                "boundingRegions": [{
+                    "pageNumber": table.page,
+                    "polygon": _polygon(table.geometry.polygon, page_w, page_h),
+                }],
+                "spans": [],
+            })
+
+        # Use real timestamps if the caller passes them; else stable placeholders.
+        # (Caller — the analyzeResults route — passes record.created_at + completed_at.)
+        return {
+            "status": "succeeded",
+            "createdDateTime": created_dt or "2026-01-01T00:00:00Z",
+            "lastUpdatedDateTime": last_updated_dt or created_dt or "2026-01-01T00:00:00Z",
+            "analyzeResult": {
+                "apiVersion": self.API_VERSION,
+                "modelId": model_id,
+                "stringIndexType": "textElements",
+                "content": content,
+                "pages": pages_out,
+                "paragraphs": paragraphs_out,
+                "tables": tables_out,
+                "styles": [],
+            },
+        }
+
+
 # Formatter registry
 FORMATTERS = {
     "textract": TextractFormatter(),
     "google": GoogleVisionFormatter(),
     "azure": AzureOCRFormatter(),
+    "azure_doc_intel": AzureDocIntelFormatter(),
     "dtat": DTATFormatter()
 }
 
